@@ -6,6 +6,7 @@ import os
 import re
 import time
 from datetime import datetime, timedelta
+import random
 
 bp = Blueprint('whatsapp', __name__, url_prefix='/webhook')
 
@@ -193,27 +194,71 @@ def process_message(user_id: str, message_text: str, instance_id: str, services:
     # If new user, create profile and send welcome message
     if user_state == 'SETUP':
         services['task'].create_user(user_id, instance_id, user_id)  # Using user_id as phone number for now
-        services['task'].update_user_state(user_id, 'TASK_SELECTION', instance_id)
+        services['task'].update_user_state(user_id, 'INITIAL_CHECK_IN', instance_id)
         return (
-            "👋 Welcome to Odinma AI Accountability System!\n\n"
-            "I'm your AI accountability partner. I'll help you:\n"
-            "✅ Set and track daily tasks\n"
-            "📊 Monitor your progress\n"
-            "🎯 Stay motivated\n\n"
-            "Let's start! What tasks would you like to accomplish today? "
-            "(List up to 3 tasks, one per line)"
+            "👋 Hi there! I'm your friendly accountability partner. I'm here to help you navigate your day, celebrate your wins (big or small), and work through any challenges.\n\n"
+            "I'm designed to be flexible and supportive, especially on those days when things feel a bit much.\n\n"
+            "So before we jump into tasks... how are you feeling today? Energetic, tired, somewhere in between? No right answers here! 💭"
         )
+    
+    # Initial check-in to gauge emotional state
+    elif user_state == 'INITIAL_CHECK_IN':
+        # Analyze sentiment to understand emotional state
+        sentiment = services['sentiment'].analyze_sentiment(message_text)
+        
+        # Store sentiment data for later reference
+        try:
+            user_ref = services['task'].db.collection('instances').document(instance_id).collection('users').document(user_id)
+            user_ref.update({
+                'current_sentiment': sentiment,
+                'last_check_in': datetime.now().isoformat()
+            })
+        except Exception:
+            # Fallback if database update fails
+            print(f"Failed to store sentiment data for user {user_id}")
+        
+        # Personalized response based on sentiment
+        energy_level = sentiment.get('energy_level', 'medium')
+        stress_level = sentiment.get('stress_level', 'medium')
+        
+        services['task'].update_user_state(user_id, 'TASK_SELECTION', instance_id)
+        
+        if stress_level == 'high':
+            return (
+                "I hear you're feeling pretty stressed today. That's totally okay and completely valid. ❤️\n\n"
+                "On days like this, let's keep things simple. What's one small thing you'd like to accomplish? "
+                "Even tiny steps forward count as progress - especially when things feel overwhelming."
+            )
+        elif energy_level == 'low':
+            return (
+                "Sounds like your energy is a bit low today. Those days happen to all of us, and that's perfectly fine. 💙\n\n"
+                "Let's be gentle with ourselves today. What's one or two things that would feel manageable? "
+                "Remember, rest is productive too, and small steps still move you forward."
+            )
+        elif energy_level == 'high':
+            return (
+                "Wow, you're sounding energetic today! That's awesome! 🌟\n\n"
+                "Since you're feeling good, what would you like to accomplish? Feel free to list a few tasks, "
+                "and maybe even throw in something that's been on your back burner. Seems like a great day to make progress!"
+            )
+        else:  # medium energy
+            return (
+                "Thanks for sharing how you're feeling! 😊\n\n"
+                "What are a couple of things you'd like to focus on today? No pressure - just whatever feels right for you. "
+                "We can always adjust as the day goes on."
+            )
     
     # If user is setting tasks
     elif user_state == 'TASK_SELECTION':
         # Check if user wants to reset or needs help
         if message_text.strip().upper() in ['HELP', 'RESET', 'RESTART']:
             return (
-                "To set your tasks, simply list them one per line. For example:\n\n"
-                "Complete project proposal\n"
-                "Exercise for 30 minutes\n"
-                "Read 20 pages of book\n\n"
-                "What tasks would you like to accomplish today?"
+                "No problem at all! Sometimes starting fresh is exactly what we need. 🌱\n\n"
+                "Just share what you'd like to accomplish today - one task per line. For example:\n\n"
+                "Read for 15 minutes\n"
+                "Take a short walk\n"
+                "Reply to that important email\n\n"
+                "Or if you're having a tough day, even something like 'drink enough water' is perfect. What feels doable today?"
             )
         
         # Analyze sentiment to adjust task load
@@ -226,19 +271,26 @@ def process_message(user_id: str, message_text: str, instance_id: str, services:
         # Check if we have tasks
         if not tasks:
             return (
-                "I didn't detect any tasks in your message. Please list your tasks, one per line. For example:\n\n"
-                "Complete project proposal\n"
-                "Exercise for 30 minutes\n"
-                "Read 20 pages of book"
+                "I don't see any specific tasks there - and that's totally okay! Some days are like that. 💫\n\n"
+                "Would you like to:\n"
+                "1. Try again with some simpler tasks (even 'rest' counts!)\n"
+                "2. Skip tasks for today and just check in later\n"
+                "3. Talk about what might be making it hard to set tasks today?"
             )
         
         # Limit number of tasks based on recommendation
         max_tasks = recommendation['task_count']
         if len(tasks) > max_tasks:
             tasks = tasks[:max_tasks]
-            extra_message = f"I've limited your tasks to {max_tasks} based on your energy levels today."
+            if max_tasks == 1:
+                extra_message = "I noticed you might be going through a lot today, so I've kept it to just one task to focus on. We can always add more later if you're feeling up to it!"
+            else:
+                extra_message = f"Based on how you're feeling, I've kept your list to {max_tasks} tasks so it feels manageable. Quality over quantity, right? 😊"
         else:
-            extra_message = ""
+            if len(tasks) == 1:
+                extra_message = "One clear focus for today - I like it! Sometimes that's all we need."
+            else:
+                extra_message = "That looks like a manageable list - nice job setting realistic goals!"
         
         # Save tasks
         services['task'].save_tasks(user_id, tasks, instance_id)
@@ -250,69 +302,91 @@ def process_message(user_id: str, message_text: str, instance_id: str, services:
         task_list = '\n'.join([f"{i+1}. {task}" for i, task in enumerate(tasks)])
         
         return (
-            f"Great! I've recorded your tasks:\n\n{task_list}\n\n"
+            f"Got it! Here's what we're focusing on today:\n\n{task_list}\n\n"
             f"{extra_message}\n\n"
             f"{recommendation['message']}\n\n"
-            "I'll check in with you later to see how you're doing! "
-            "You can update me anytime by typing:\n"
-            "✅ DONE [task number] - to mark a task as complete\n"
-            "🔄 PROGRESS [task number] - to mark as in progress\n"
-            "❌ STUCK [task number] - if you need help"
+            "I'll check in with you later, but feel free to update me anytime by:\n"
+            "• Typing 'DONE 1' when you complete something\n"
+            "• 'PROGRESS 2' if you're working on it\n"
+            "• 'STUCK 3' if you're finding something challenging\n"
+            "• or just 'CHAT' if you need someone to talk to"
         )
     
     # If user is checking in
     elif user_state == 'CHECK_IN':
         # Check for commands
         if message_text.strip().upper() == 'NEW TASKS':
-            services['task'].update_user_state(user_id, 'TASK_SELECTION', instance_id)
+            services['task'].update_user_state(user_id, 'INITIAL_CHECK_IN', instance_id)
             return (
-                "Let's set new tasks for today! What would you like to accomplish? "
-                "Please list your tasks, one per line."
+                "Let's start fresh! But first, how are you feeling right now? Has your energy shifted since earlier? "
+                "Checking in helps me better support you. 💭"
             )
         elif message_text.strip().upper() == 'SUMMARY':
             # Get user metrics
             metrics = services['task'].get_user_metrics(user_id, instance_id)
+            
+            completion_rate = metrics.get('completion_rate', 0)
+            completed_tasks = metrics.get('completed_tasks', 0)
+            
+            encouragement = "That's awesome progress!" if completion_rate > 70 else "Every step counts, even the small ones."
+            
             return (
-                f"📊 Your Progress Summary:\n\n"
-                f"Tasks Completed: {metrics.get('completed_tasks', 0)}/{metrics.get('total_tasks', 0)}\n"
-                f"Completion Rate: {metrics.get('completion_rate', 0):.1f}%\n\n"
-                f"Keep up the great work! 💪"
+                f"📊 Here's your progress snapshot:\n\n"
+                f"Tasks completed: {completed_tasks}\n"
+                f"Completion rate: {completion_rate:.1f}%\n\n"
+                f"{encouragement}\n\n"
+                f"Remember, progress isn't always linear - especially for neurodivergent brains! Some days flow easier than others, and that's completely normal. What matters is you're showing up. 💫"
             )
         elif message_text.strip().upper() == 'HELP':
             return (
-                "Here's how to use the Odinma AI Accountability System:\n\n"
-                "✅ DONE [task number] - Mark a task as complete\n"
-                "🔄 PROGRESS [task number] - Mark a task as in progress\n"
-                "❌ STUCK [task number] - Indicate you need help with a task\n"
-                "NEW TASKS - Start a new set of tasks\n"
-                "SUMMARY - View your progress summary\n"
-                "TASKS - View your current tasks\n\n"
-                "How can I assist you today?"
+                "I'm here for you! Here's how we can chat:\n\n"
+                "• 'DONE 1' - Celebrate completing task #1\n"
+                "• 'PROGRESS 2' - Update that you're working on task #2\n"
+                "• 'STUCK 3' - Let me know you're finding task #3 challenging\n"
+                "• 'NEW TASKS' - Start fresh with different tasks\n"
+                "• 'SUMMARY' - See your progress overview\n"
+                "• 'TASKS' - Review your current tasks\n"
+                "• 'CHAT' - Just talk without focusing on tasks\n\n"
+                "What would help you most right now?"
             )
         elif message_text.strip().upper() == 'TASKS':
             # Get current tasks
             tasks = services['task'].get_daily_tasks(user_id, instance_id)
             if not tasks:
-                return "You don't have any tasks set for today. Type NEW TASKS to set some!"
+                return "Looks like we haven't set up any tasks yet today. No pressure at all - what would feel good to focus on right now?"
             
-            # Format task list
-            task_list = '\n'.join([f"{i+1}. {task['task']} - {task['status'].upper()}" for i, task in enumerate(tasks)])
+            # Format task list with emojis based on status
+            task_lines = []
+            for i, task in enumerate(tasks):
+                status = task['status']
+                if status == 'completed':
+                    emoji = "✅"
+                elif status == 'in_progress':
+                    emoji = "🔄"
+                elif status == 'stuck':
+                    emoji = "❌"
+                else:
+                    emoji = "⭐"
+                task_lines.append(f"{i+1}. {emoji} {task['task']}")
+            
+            task_list = '\n'.join(task_lines)
             
             return (
-                f"📝 Here are your current tasks:\n\n{task_list}\n\n"
-                f"Update me on your progress using:\n"
-                f"✅ DONE [task number]\n"
-                f"🔄 PROGRESS [task number]\n"
-                f"❌ STUCK [task number]"
+                f"Here's where things stand with your tasks:\n\n{task_list}\n\n"
+                f"How's it going? Any wins to celebrate or challenges you're facing?"
+            )
+        elif message_text.strip().upper() == 'CHAT':
+            return (
+                "I'm all ears! What's on your mind? Whether it's about your tasks, how your day is going, or just needing a moment to vent - I'm here for it. No pressure to be productive right now."
             )
         
         return handle_check_in(user_id, message_text, instance_id, services)
     
     # Default response for unknown state
-    services['task'].update_user_state(user_id, 'TASK_SELECTION', instance_id)
+    services['task'].update_user_state(user_id, 'INITIAL_CHECK_IN', instance_id)
     return (
-        "I'm not sure what you'd like to do. Let's start fresh!\n\n"
-        "What tasks would you like to accomplish today? Please list them one per line."
+        "Let's take a moment to reconnect! How are you feeling right now? Energetic, tired, overwhelmed, excited? "
+        "No judgment here - just checking in so I can better support you."
     )
 
 def handle_check_in(user_id: str, message_text: str, instance_id: str, services: dict) -> str:
@@ -321,29 +395,92 @@ def handle_check_in(user_id: str, message_text: str, instance_id: str, services:
     status_match = re.match(r'(DONE|PROGRESS|STUCK)\s+(\d+)', message_text.upper())
     if status_match:
         status_type = status_match.group(1)
-        task_num = int(status_match.group(2)) - 1  # Convert to 0-based index
+        task_num_str = status_match.group(2)
         
-        status_map = {
-            'DONE': 'completed',
-            'PROGRESS': 'in_progress',
-            'STUCK': 'stuck'
-        }
-        
-        services['task'].update_task_status(user_id, task_num, status_map[status_type], instance_id)
-        
-        if status_type == 'DONE':
-            return "🎉 Great job completing that task! Keep up the momentum!"
-        elif status_type == 'PROGRESS':
-            return "👍 Thanks for the update! Keep pushing forward!"
-        else:  # STUCK
-            return (
-                "I understand you're feeling stuck. That's completely normal. "
-                "Would you like to:\n"
-                "1. Break down the task into smaller steps?\n"
-                "2. Get some motivation?\n"
-                "3. Skip this task for now?"
-            )
+        try:
+            task_num = int(task_num_str) - 1  # Convert to 0-based index
+            
+            # Get current tasks to validate task number
+            tasks = services['task'].get_daily_tasks(user_id, instance_id)
+            if task_num < 0 or task_num >= len(tasks):
+                return f"Hmm, I don't see task #{task_num_str} on your list. Want to try again or type 'TASKS' to see your current list?"
+            
+            # Get the task name for personalized response
+            task_name = tasks[task_num]['task']
+            
+            status_map = {
+                'DONE': 'completed',
+                'PROGRESS': 'in_progress',
+                'STUCK': 'stuck'
+            }
+            
+            services['task'].update_task_status(user_id, task_num, status_map[status_type], instance_id)
+            
+            if status_type == 'DONE':
+                # Vary responses to avoid repetition
+                responses = [
+                    f"🎉 Yes! You completed '{task_name}'! That's a genuine win - how did it feel to finish that one?",
+                    f"✨ Amazing job finishing '{task_name}'! What helped you get this done today?",
+                    f"💪 '{task_name}' → DONE! That's awesome progress. Would you like to take a moment to celebrate?"
+                ]
+                return random.choice(responses)
+            elif status_type == 'PROGRESS':
+                responses = [
+                    f"👍 Thanks for letting me know you're working on '{task_name}'. Taking those first steps can be the hardest part!",
+                    f"🔄 Got it - '{task_name}' is in progress. Remember, consistent effort matters more than perfect execution.",
+                    f"⏳ '{task_name}' in progress - that's great! Is there anything that would make this task flow better for you?"
+                ]
+                return random.choice(responses)
+            else:  # STUCK
+                return (
+                    f"I hear you're feeling stuck with '{task_name}'. That happens to everyone, especially with complicated or less interesting tasks.\n\n"
+                    f"Would you like to:\n"
+                    f"1. Break this down into smaller steps?\n"
+                    f"2. Talk about what specific part feels challenging?\n"
+                    f"3. Get some motivation or a different approach?\n"
+                    f"4. Set this aside for now and come back to it later?"
+                )
+        except ValueError:
+            return "I didn't quite catch which task number you meant. Could you try again with something like 'DONE 1' or 'STUCK 2'?"
     
-    # Get current tasks and their status
+    # If we get here, it's a general message during CHECK_IN state
+    # Analyze sentiment to provide an empathetic response
+    sentiment = services['sentiment'].analyze_sentiment(message_text)
+    
+    # Get current tasks
     tasks = services['task'].get_daily_tasks(user_id, instance_id)
-    return services['whatsapp'].send_task_reminder(user_id, tasks) 
+    completed = sum(1 for task in tasks if task.get('status') == 'completed')
+    
+    # Create a contextual response based on progress and sentiment
+    if not tasks:
+        return "We haven't set any tasks for today yet. Would you like to share what you'd like to focus on?"
+    
+    # Format task list with status indicators
+    task_list = '\n'.join([
+        f"{i+1}. {'✅' if task['status'] == 'completed' else '⭐'} {task['task']}" 
+        for i, task in enumerate(tasks)
+    ])
+    
+    # Varied responses based on progress
+    if completed == 0:
+        if sentiment.get('sentiment') == 'negative':
+            return (
+                f"I hear things might be tough right now. That's okay - some days are harder than others.\n\n"
+                f"Here are your tasks when you're ready:\n\n{task_list}\n\n"
+                f"Even small progress counts. Is there something specific making today challenging?"
+            )
+        else:
+            return (
+                f"Here's what we're focusing on today:\n\n{task_list}\n\n"
+                f"How's it going so far? Remember, you can update me anytime with 'DONE', 'PROGRESS', or 'STUCK'."
+            )
+    elif completed == len(tasks):
+        return (
+            f"🎊 Wow! You've completed all your tasks!\n\n{task_list}\n\n"
+            f"That's seriously impressive. How are you feeling about what you've accomplished? Would you like to set any new goals or take some well-deserved rest?"
+        )
+    else:
+        return (
+            f"Here's where things stand:\n\n{task_list}\n\n"
+            f"You've completed {completed}/{len(tasks)} tasks - that's progress to be proud of! How are you feeling about the rest? Anything I can help with?"
+        ) 
