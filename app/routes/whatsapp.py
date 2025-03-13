@@ -97,7 +97,28 @@ def webhook():
                     message = value['messages'][0]
                     message_id = message['id']
                     user_id = message['from']
-                    message_text = message['text']['body']
+                    
+                    # Check message type
+                    if 'text' in message and 'body' in message['text']:
+                        message_text = message['text']['body']
+                    elif 'image' in message:
+                        # Handle image message
+                        message_text = "[IMAGE] Image received. I can only process text messages at the moment."
+                    elif 'audio' in message:
+                        # Handle audio message
+                        message_text = "[AUDIO] Audio received. I can only process text messages at the moment."
+                    elif 'video' in message:
+                        # Handle video message
+                        message_text = "[VIDEO] Video received. I can only process text messages at the moment."
+                    elif 'document' in message:
+                        # Handle document message
+                        message_text = "[DOCUMENT] Document received. I can only process text messages at the moment."
+                    elif 'location' in message:
+                        # Handle location message
+                        message_text = "[LOCATION] Location received. I can only process text messages at the moment."
+                    else:
+                        # Unknown message type
+                        message_text = "I received your message but couldn't understand the format. Please send text messages only."
                     
                     # Check for duplicate message
                     if message_id in message_cache:
@@ -113,6 +134,11 @@ def webhook():
                     # Determine which instance this message belongs to
                     recipient_id = value.get('metadata', {}).get('phone_number_id')
                     instance_id = get_instance_from_phone_number(recipient_id)
+                    
+                    # Check if instance exists
+                    if instance_id not in instances:
+                        print(f"Error: Instance {instance_id} not found. Using instance1 as fallback.")
+                        instance_id = 'instance1'
                     
                     # Get services for this instance
                     services = instances[instance_id]
@@ -132,11 +158,19 @@ def webhook():
                     message_cache[message_id]['processed'] = True
                     
                     return jsonify({'status': 'success'}), 200
+                else:
+                    print("Webhook received but no messages found in the payload")
+            else:
+                print("Webhook received but no changes found in the entry")
+        else:
+            print("Webhook received but no entry found in the data")
 
         return jsonify({'status': 'no_message'}), 200
 
     except Exception as e:
         print(f"Error processing webhook: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 # For backward compatibility, redirect instance-specific routes to the main webhook
@@ -159,6 +193,7 @@ def process_message(user_id: str, message_text: str, instance_id: str, services:
     # If new user, create profile and send welcome message
     if user_state == 'SETUP':
         services['task'].create_user(user_id, instance_id, user_id)  # Using user_id as phone number for now
+        services['task'].update_user_state(user_id, 'TASK_SELECTION', instance_id)
         return (
             "👋 Welcome to Odinma AI Accountability System!\n\n"
             "I'm your AI accountability partner. I'll help you:\n"
@@ -166,11 +201,21 @@ def process_message(user_id: str, message_text: str, instance_id: str, services:
             "📊 Monitor your progress\n"
             "🎯 Stay motivated\n\n"
             "Let's start! What tasks would you like to accomplish today? "
-            "(List up to 3 tasks)"
+            "(List up to 3 tasks, one per line)"
         )
     
     # If user is setting tasks
     elif user_state == 'TASK_SELECTION':
+        # Check if user wants to reset or needs help
+        if message_text.strip().upper() in ['HELP', 'RESET', 'RESTART']:
+            return (
+                "To set your tasks, simply list them one per line. For example:\n\n"
+                "Complete project proposal\n"
+                "Exercise for 30 minutes\n"
+                "Read 20 pages of book\n\n"
+                "What tasks would you like to accomplish today?"
+            )
+        
         # Analyze sentiment to adjust task load
         sentiment = services['sentiment'].analyze_sentiment(message_text)
         recommendation = services['sentiment'].get_task_recommendation(sentiment)
@@ -178,26 +223,96 @@ def process_message(user_id: str, message_text: str, instance_id: str, services:
         # Parse tasks from message
         tasks = [task.strip() for task in message_text.split('\n') if task.strip()]
         
+        # Check if we have tasks
+        if not tasks:
+            return (
+                "I didn't detect any tasks in your message. Please list your tasks, one per line. For example:\n\n"
+                "Complete project proposal\n"
+                "Exercise for 30 minutes\n"
+                "Read 20 pages of book"
+            )
+        
+        # Limit number of tasks based on recommendation
+        max_tasks = recommendation['task_count']
+        if len(tasks) > max_tasks:
+            tasks = tasks[:max_tasks]
+            extra_message = f"I've limited your tasks to {max_tasks} based on your energy levels today."
+        else:
+            extra_message = ""
+        
         # Save tasks
         services['task'].save_tasks(user_id, tasks, instance_id)
         
+        # Update user state
+        services['task'].update_user_state(user_id, 'CHECK_IN', instance_id)
+        
+        # Format task list for display
+        task_list = '\n'.join([f"{i+1}. {task}" for i, task in enumerate(tasks)])
+        
         return (
-            f"Great! I've recorded your tasks. Based on your energy levels, "
+            f"Great! I've recorded your tasks:\n\n{task_list}\n\n"
+            f"{extra_message}\n\n"
             f"{recommendation['message']}\n\n"
-            "I'll check in with you later to see how you're doing!"
+            "I'll check in with you later to see how you're doing! "
+            "You can update me anytime by typing:\n"
+            "✅ DONE [task number] - to mark a task as complete\n"
+            "🔄 PROGRESS [task number] - to mark as in progress\n"
+            "❌ STUCK [task number] - if you need help"
         )
     
     # If user is checking in
     elif user_state == 'CHECK_IN':
+        # Check for commands
+        if message_text.strip().upper() == 'NEW TASKS':
+            services['task'].update_user_state(user_id, 'TASK_SELECTION', instance_id)
+            return (
+                "Let's set new tasks for today! What would you like to accomplish? "
+                "Please list your tasks, one per line."
+            )
+        elif message_text.strip().upper() == 'SUMMARY':
+            # Get user metrics
+            metrics = services['task'].get_user_metrics(user_id, instance_id)
+            return (
+                f"📊 Your Progress Summary:\n\n"
+                f"Tasks Completed: {metrics.get('completed_tasks', 0)}/{metrics.get('total_tasks', 0)}\n"
+                f"Completion Rate: {metrics.get('completion_rate', 0):.1f}%\n\n"
+                f"Keep up the great work! 💪"
+            )
+        elif message_text.strip().upper() == 'HELP':
+            return (
+                "Here's how to use the Odinma AI Accountability System:\n\n"
+                "✅ DONE [task number] - Mark a task as complete\n"
+                "🔄 PROGRESS [task number] - Mark a task as in progress\n"
+                "❌ STUCK [task number] - Indicate you need help with a task\n"
+                "NEW TASKS - Start a new set of tasks\n"
+                "SUMMARY - View your progress summary\n"
+                "TASKS - View your current tasks\n\n"
+                "How can I assist you today?"
+            )
+        elif message_text.strip().upper() == 'TASKS':
+            # Get current tasks
+            tasks = services['task'].get_daily_tasks(user_id, instance_id)
+            if not tasks:
+                return "You don't have any tasks set for today. Type NEW TASKS to set some!"
+            
+            # Format task list
+            task_list = '\n'.join([f"{i+1}. {task['task']} - {task['status'].upper()}" for i, task in enumerate(tasks)])
+            
+            return (
+                f"📝 Here are your current tasks:\n\n{task_list}\n\n"
+                f"Update me on your progress using:\n"
+                f"✅ DONE [task number]\n"
+                f"🔄 PROGRESS [task number]\n"
+                f"❌ STUCK [task number]"
+            )
+        
         return handle_check_in(user_id, message_text, instance_id, services)
     
-    # Default response
+    # Default response for unknown state
+    services['task'].update_user_state(user_id, 'TASK_SELECTION', instance_id)
     return (
-        "I'm not sure what you'd like to do. You can:\n"
-        "1. Set new tasks for today\n"
-        "2. Check in on your progress\n"
-        "3. View your task history\n"
-        "What would you like to do?"
+        "I'm not sure what you'd like to do. Let's start fresh!\n\n"
+        "What tasks would you like to accomplish today? Please list them one per line."
     )
 
 def handle_check_in(user_id: str, message_text: str, instance_id: str, services: dict) -> str:
