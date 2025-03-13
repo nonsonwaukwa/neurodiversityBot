@@ -4,6 +4,8 @@ from app.services.sentiment_service import SentimentService
 from app.services.task_service import TaskService
 import os
 import re
+import time
+from datetime import datetime, timedelta
 
 bp = Blueprint('whatsapp', __name__, url_prefix='/webhook')
 
@@ -24,6 +26,27 @@ phone_number_mapping = {
     # Instance 2 phone numbers
     os.getenv('WHATSAPP_PHONE_NUMBER_ID_INSTANCE2'): 'instance2',
 }
+
+# Message deduplication cache
+# Structure: {'message_id': {'timestamp': unix_time, 'processed': True/False}}
+message_cache = {}
+
+# Clean message cache every 5 minutes
+def clean_message_cache():
+    """Remove messages older than 30 minutes from the cache"""
+    current_time = time.time()
+    expired_ids = []
+    
+    for msg_id, data in message_cache.items():
+        # If message is older than 30 minutes, mark for removal
+        if current_time - data['timestamp'] > 1800:  # 30 minutes in seconds
+            expired_ids.append(msg_id)
+    
+    # Remove expired messages
+    for msg_id in expired_ids:
+        del message_cache[msg_id]
+    
+    print(f"Cleaned message cache. Removed {len(expired_ids)} expired messages. Current cache size: {len(message_cache)}")
 
 def get_instance_from_phone_number(phone_number: str) -> str:
     """Determine which instance a phone number belongs to."""
@@ -59,6 +82,10 @@ def webhook():
     print(f"Received webhook data:", data)
 
     try:
+        # Clean the message cache periodically
+        if len(message_cache) > 100:  # If cache gets too large
+            clean_message_cache()
+            
         # Check if this is a WhatsApp message
         if data and 'entry' in data and data['entry']:
             entry = data['entry'][0]
@@ -68,8 +95,20 @@ def webhook():
                     # Extract message details
                     value = change['value']
                     message = value['messages'][0]
+                    message_id = message['id']
                     user_id = message['from']
                     message_text = message['text']['body']
+                    
+                    # Check for duplicate message
+                    if message_id in message_cache:
+                        print(f"Duplicate message {message_id} detected. Skipping processing.")
+                        return jsonify({'status': 'duplicate_message_ignored'}), 200
+                    
+                    # Add message to cache
+                    message_cache[message_id] = {
+                        'timestamp': time.time(),
+                        'processed': False
+                    }
                     
                     # Determine which instance this message belongs to
                     recipient_id = value.get('metadata', {}).get('phone_number_id')
@@ -78,7 +117,7 @@ def webhook():
                     # Get services for this instance
                     services = instances[instance_id]
                     
-                    print(f"Processing message for instance {instance_id}")
+                    print(f"Processing message {message_id} for instance {instance_id}")
                     
                     # Process the message based on user's state
                     response = process_message(user_id, message_text, instance_id, services)
@@ -89,12 +128,15 @@ def webhook():
                     # Log the conversation
                     services['task'].log_conversation(user_id, message_text, response, instance_id)
                     
+                    # Mark message as processed
+                    message_cache[message_id]['processed'] = True
+                    
                     return jsonify({'status': 'success'}), 200
 
         return jsonify({'status': 'no_message'}), 200
 
     except Exception as e:
-        print(f"Error processing webhook: {e}")
+        print(f"Error processing webhook: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
 # For backward compatibility, redirect instance-specific routes to the main webhook
