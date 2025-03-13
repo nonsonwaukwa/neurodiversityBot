@@ -1,0 +1,28 @@
+# Environment
+.env
+venv/
+env/
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Firebase credentials
+config/*.json
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+
+# Log files
+*.log
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS specific files
+.DS_Store
+Thumbs.db 
