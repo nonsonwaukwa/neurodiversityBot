@@ -3,6 +3,7 @@ import { collection, getDocs, query, orderBy, limit } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import DashboardLayout from '../../components/DashboardLayout';
 import NextLink from 'next/link';
+import { safeFormatDate, dateToMillis } from '../../utils/dateUtils';
 import {
   Box,
   Button,
@@ -37,7 +38,6 @@ import {
   FiChevronDown,
   FiRefreshCw
 } from 'react-icons/fi';
-import { format } from 'date-fns';
 
 export default function Users() {
   const [users, setUsers] = useState([]);
@@ -68,32 +68,34 @@ export default function Users() {
       const query = searchQuery.toLowerCase();
       result = result.filter(user => 
         (user.id && user.id.toLowerCase().includes(query)) ||
-        (user.phone_number && user.phone_number.toLowerCase().includes(query)) ||
+        (user.phone_number && user.phone_number?.toLowerCase().includes(query)) ||
         (user.state && user.state.toLowerCase().includes(query))
       );
     }
     
     // Apply sorting
     result.sort((a, b) => {
-      let valueA = a[sortField];
-      let valueB = b[sortField];
+      let valueA, valueB;
       
-      // Handle dates
+      // Handle dates with our utility function
       if (sortField === 'created_at' || sortField === 'last_interaction') {
-        valueA = valueA ? new Date(valueA).getTime() : 0;
-        valueB = valueB ? new Date(valueB).getTime() : 0;
+        valueA = dateToMillis(a[sortField]);
+        valueB = dateToMillis(b[sortField]);
       }
-      
       // Handle numbers
       else if (sortField === 'metrics.completion_rate') {
         valueA = a.metrics?.completion_rate || 0;
         valueB = b.metrics?.completion_rate || 0;
       }
-      
       // For strings
-      else if (typeof valueA === 'string' && typeof valueB === 'string') {
-        valueA = valueA.toLowerCase();
-        valueB = valueB.toLowerCase();
+      else if (typeof a[sortField] === 'string' && typeof b[sortField] === 'string') {
+        valueA = a[sortField].toLowerCase();
+        valueB = b[sortField].toLowerCase();
+      }
+      else {
+        // Default values if properties don't exist
+        valueA = a[sortField] || '';
+        valueB = b[sortField] || '';
       }
       
       if (valueA === valueB) {
@@ -116,6 +118,7 @@ export default function Users() {
         ...doc.data()
       }));
       
+      console.log('Fetched users:', userData);
       setUsers(userData);
       setLoading(false);
     } catch (err) {
@@ -321,16 +324,10 @@ export default function Users() {
                       }
                     </Td>
                     <Td>
-                      {user.last_interaction ? 
-                        format(new Date(user.last_interaction), 'MMM dd, yyyy') :
-                        'Never'
-                      }
+                      {safeFormatDate(user.last_interaction, 'MMM dd, yyyy', 'Never')}
                     </Td>
                     <Td>
-                      {user.created_at ?
-                        format(new Date(user.created_at), 'MMM dd, yyyy') :
-                        'Unknown'
-                      }
+                      {safeFormatDate(user.created_at, 'MMM dd, yyyy', 'Unknown')}
                     </Td>
                     <Td>
                       <NextLink href={`/users/${user.id}`} passHref>

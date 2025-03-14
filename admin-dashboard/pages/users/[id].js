@@ -3,6 +3,7 @@ import { useRouter } from 'next/router';
 import { doc, getDoc, collection, getDocs, query, orderBy, limit } from 'firebase/firestore';
 import { db } from '../../lib/firebase';
 import DashboardLayout from '../../components/DashboardLayout';
+import { safeFormatDate, dateToMillis } from '../../utils/dateUtils';
 import {
   Box,
   Button,
@@ -44,9 +45,8 @@ import {
   FiClock, 
   FiCheckCircle
 } from 'react-icons/fi';
-import { format } from 'date-fns';
-import { LineChart } from '../../components/Charts';
 import NextLink from 'next/link';
+import { LineChart } from '../../components/Charts';
 
 export default function UserDetail() {
   const router = useRouter();
@@ -80,20 +80,27 @@ export default function UserDetail() {
           id: userDoc.id,
           ...userDoc.data()
         };
+        
+        console.log('Fetched user data:', userData);
         setUser(userData);
         
         // Get recent messages
-        const messagesQuery = query(
-          collection(db, 'instances/instance1/users', id, 'conversations'),
-          orderBy('timestamp', 'desc'),
-          limit(10)
-        );
-        const messagesSnapshot = await getDocs(messagesQuery);
-        const messagesData = messagesSnapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data()
-        }));
-        setRecentMessages(messagesData);
+        try {
+          const messagesQuery = query(
+            collection(db, 'instances/instance1/users', id, 'conversations'),
+            orderBy('timestamp', 'desc'),
+            limit(10)
+          );
+          const messagesSnapshot = await getDocs(messagesQuery);
+          const messagesData = messagesSnapshot.docs.map(doc => ({
+            id: doc.id,
+            ...doc.data()
+          }));
+          setRecentMessages(messagesData);
+        } catch (msgError) {
+          console.warn("Could not fetch messages:", msgError);
+          // Don't fail completely if just messages fail to load
+        }
         
         // Get stress and completion metrics (simulated for now)
         // In a real implementation, this would come from a metrics collection
@@ -201,7 +208,7 @@ export default function UserDetail() {
                 {user?.created_at && (
                   <Flex align="center">
                     <Icon as={FiCalendar} mr={1} />
-                    <Text>Joined {format(new Date(user.created_at), 'MMM dd, yyyy')}</Text>
+                    <Text>Joined {safeFormatDate(user.created_at, 'MMM dd, yyyy')}</Text>
                   </Flex>
                 )}
               </HStack>
@@ -239,15 +246,12 @@ export default function UserDetail() {
             <StatLabel>Last Activity</StatLabel>
             <StatNumber>
               <Text fontSize="md" fontWeight="bold">
-                {user?.last_interaction 
-                  ? format(new Date(user.last_interaction), 'MMM dd, h:mm a')
-                  : 'Never'
-                }
+                {safeFormatDate(user?.last_interaction, 'MMM dd, h:mm a', 'Never')}
               </Text>
             </StatNumber>
             <StatHelpText>
               {user?.last_interaction
-                ? `${Math.round((Date.now() - new Date(user.last_interaction).getTime()) / (1000 * 60 * 60))} hours ago`
+                ? `${Math.round((Date.now() - dateToMillis(user.last_interaction)) / (1000 * 60 * 60))} hours ago`
                 : 'No activity recorded'
               }
             </StatHelpText>
@@ -313,10 +317,7 @@ export default function UserDetail() {
                     {recentMessages.map((message) => (
                       <Tr key={message.id}>
                         <Td whiteSpace="nowrap">
-                          {message.timestamp 
-                            ? format(new Date(message.timestamp), 'MMM dd, yyyy h:mm a')
-                            : '-'
-                          }
+                          {safeFormatDate(message.timestamp, 'MMM dd, yyyy h:mm a', '-')}
                         </Td>
                         <Td maxW="200px" isTruncated>{message.content || '-'}</Td>
                         <Td>
