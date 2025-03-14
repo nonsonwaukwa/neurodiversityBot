@@ -34,6 +34,7 @@ import {
   useToast,
   Alert,
   AlertIcon,
+  Tag,
 } from '@chakra-ui/react';
 import { 
   FiUser, 
@@ -43,7 +44,8 @@ import {
   FiActivity, 
   FiMessageCircle, 
   FiClock, 
-  FiCheckCircle
+  FiCheckCircle,
+  FiServer
 } from 'react-icons/fi';
 import NextLink from 'next/link';
 import { LineChart } from '../../components/Charts';
@@ -67,8 +69,8 @@ export default function UserDetail() {
     async function fetchUserData() {
       setLoading(true);
       try {
-        // Get user data
-        const userDoc = await getDoc(doc(db, 'instances/instance1/users', id));
+        // Get user data from the unified users collection
+        const userDoc = await getDoc(doc(db, 'users', id));
         
         if (!userDoc.exists()) {
           setError('User not found');
@@ -84,10 +86,13 @@ export default function UserDetail() {
         console.log('Fetched user data:', userData);
         setUser(userData);
         
+        // Determine which instance to fetch conversations from
+        const instancePath = userData.instance || 'instance1';
+        
         // Get recent messages
         try {
           const messagesQuery = query(
-            collection(db, 'instances/instance1/users', id, 'conversations'),
+            collection(db, `instances/${instancePath}/users`, id, 'conversations'),
             orderBy('timestamp', 'desc'),
             limit(10)
           );
@@ -203,6 +208,17 @@ export default function UserDetail() {
                   <Flex align="center">
                     <Icon as={FiPhone} mr={1} />
                     <Text>{user.phone_number}</Text>
+                  </Flex>
+                )}
+                {user?.instance && (
+                  <Flex align="center">
+                    <Icon as={FiServer} mr={1} />
+                    <Tag
+                      size="sm"
+                      colorScheme={user.instance === 'instance1' ? 'blue' : 'purple'}
+                    >
+                      {user.instance}
+                    </Tag>
                   </Flex>
                 )}
                 {user?.created_at && (
