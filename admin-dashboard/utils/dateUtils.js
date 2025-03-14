@@ -1,3 +1,5 @@
+import { format } from 'date-fns';
+
 // Safe date formatting utility functions
 
 /**
@@ -7,8 +9,6 @@
  * @param {string} fallbackValue - Value to return if date is invalid
  * @returns {string} Formatted date string or fallback value
  */
-import { format } from 'date-fns';
-
 export function safeFormatDate(dateValue, formatString = 'MMM dd, yyyy', fallbackValue = 'N/A') {
   if (!dateValue) return fallbackValue;
   

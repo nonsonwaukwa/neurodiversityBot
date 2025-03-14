@@ -28,6 +28,7 @@ import {
   Center,
   Alert,
   AlertIcon,
+  Code,
 } from '@chakra-ui/react';
 import { 
   FiSearch, 
@@ -44,6 +45,7 @@ export default function Users() {
   const [filteredUsers, setFilteredUsers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [debugInfo, setDebugInfo] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortField, setSortField] = useState('created_at');
   const [sortDirection, setSortDirection] = useState('desc');
@@ -55,75 +57,106 @@ export default function Users() {
   }, []);
 
   useEffect(() => {
-    // Apply filters and sorting when dependencies change
-    let result = [...users];
-    
-    // Apply status filter
-    if (statusFilter !== 'all') {
-      result = result.filter(user => user.active === (statusFilter === 'active'));
+    try {
+      // Apply filters and sorting when dependencies change
+      if (users.length === 0) {
+        setFilteredUsers([]);
+        return;
+      }
+      
+      // Deep clone to avoid mutation issues
+      let result = JSON.parse(JSON.stringify(users));
+      
+      // Apply status filter
+      if (statusFilter !== 'all') {
+        result = result.filter(user => user.active === (statusFilter === 'active'));
+      }
+      
+      // Apply search filter (on id, phone number, or state)
+      if (searchQuery) {
+        const query = searchQuery.toLowerCase();
+        result = result.filter(user => 
+          (user.id && user.id.toLowerCase().includes(query)) ||
+          (user.phone_number && typeof user.phone_number === 'string' && user.phone_number.toLowerCase().includes(query)) ||
+          (user.state && user.state.toLowerCase().includes(query))
+        );
+      }
+      
+      // Apply sorting
+      result.sort((a, b) => {
+        let valueA, valueB;
+        
+        try {
+          // Handle dates with our utility function
+          if (sortField === 'created_at' || sortField === 'last_interaction') {
+            valueA = dateToMillis(a[sortField]);
+            valueB = dateToMillis(b[sortField]);
+          }
+          // Handle numbers
+          else if (sortField === 'metrics.completion_rate') {
+            valueA = a.metrics?.completion_rate || 0;
+            valueB = b.metrics?.completion_rate || 0;
+          }
+          // For strings
+          else if (typeof a[sortField] === 'string' && typeof b[sortField] === 'string') {
+            valueA = a[sortField].toLowerCase();
+            valueB = b[sortField].toLowerCase();
+          }
+          else {
+            // Default values if properties don't exist
+            valueA = a[sortField] || '';
+            valueB = b[sortField] || '';
+          }
+        } catch (error) {
+          console.error('Error during sorting:', error, 'field:', sortField, 'values:', a[sortField], b[sortField]);
+          // Use safe defaults
+          valueA = '';
+          valueB = '';
+        }
+        
+        if (valueA === valueB) {
+          return 0;
+        }
+        
+        const direction = sortDirection === 'asc' ? 1 : -1;
+        return valueA < valueB ? -1 * direction : 1 * direction;
+      });
+      
+      setFilteredUsers(result);
+    } catch (err) {
+      console.error("Error filtering/sorting users:", err);
+      setDebugInfo(JSON.stringify({ error: err.message, stack: err.stack }));
     }
-    
-    // Apply search filter (on id, phone number, or state)
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
-      result = result.filter(user => 
-        (user.id && user.id.toLowerCase().includes(query)) ||
-        (user.phone_number && user.phone_number?.toLowerCase().includes(query)) ||
-        (user.state && user.state.toLowerCase().includes(query))
-      );
-    }
-    
-    // Apply sorting
-    result.sort((a, b) => {
-      let valueA, valueB;
-      
-      // Handle dates with our utility function
-      if (sortField === 'created_at' || sortField === 'last_interaction') {
-        valueA = dateToMillis(a[sortField]);
-        valueB = dateToMillis(b[sortField]);
-      }
-      // Handle numbers
-      else if (sortField === 'metrics.completion_rate') {
-        valueA = a.metrics?.completion_rate || 0;
-        valueB = b.metrics?.completion_rate || 0;
-      }
-      // For strings
-      else if (typeof a[sortField] === 'string' && typeof b[sortField] === 'string') {
-        valueA = a[sortField].toLowerCase();
-        valueB = b[sortField].toLowerCase();
-      }
-      else {
-        // Default values if properties don't exist
-        valueA = a[sortField] || '';
-        valueB = b[sortField] || '';
-      }
-      
-      if (valueA === valueB) {
-        return 0;
-      }
-      
-      const direction = sortDirection === 'asc' ? 1 : -1;
-      return valueA < valueB ? -1 * direction : 1 * direction;
-    });
-    
-    setFilteredUsers(result);
   }, [users, searchQuery, statusFilter, sortField, sortDirection]);
 
   const fetchUsers = async () => {
     setLoading(true);
     try {
       const usersSnapshot = await getDocs(collection(db, 'instances/instance1/users'));
-      const userData = usersSnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
       
-      console.log('Fetched users:', userData);
+      if (usersSnapshot.empty) {
+        console.log('No users found in collection');
+        setUsers([]);
+        setLoading(false);
+        return;
+      }
+      
+      const userData = usersSnapshot.docs.map(doc => {
+        const data = doc.data();
+        console.log(`User ${doc.id} data:`, data);
+        return {
+          id: doc.id,
+          ...data
+        };
+      });
+      
+      console.log('All fetched users:', userData);
       setUsers(userData);
       setLoading(false);
     } catch (err) {
       console.error("Error fetching users:", err);
       setError("Failed to fetch users. Please try again.");
+      setDebugInfo(JSON.stringify({ error: err.message, stack: err.stack }));
       setLoading(false);
       
       toast({
@@ -153,6 +186,16 @@ export default function Users() {
       duration: 2000,
       isClosable: true,
     });
+  };
+
+  // Helper function to safely render dates
+  const renderDate = (dateValue, format, fallback) => {
+    try {
+      return safeFormatDate(dateValue, format, fallback);
+    } catch (error) {
+      console.error('Error formatting date:', dateValue, error);
+      return fallback || 'Error';
+    }
   };
 
   return (
@@ -213,6 +256,19 @@ export default function Users() {
         </Alert>
       )}
       
+      {/* Debug Info */}
+      {debugInfo && (
+        <Alert status="warning" mb={6} borderRadius="md">
+          <AlertIcon />
+          <Box>
+            <Text mb={2}>Debug Information:</Text>
+            <Code p={2} maxH="200px" overflow="auto" w="100%" fontSize="xs">
+              {debugInfo}
+            </Code>
+          </Box>
+        </Alert>
+      )}
+      
       {/* Users Table */}
       <Box bg="white" shadow="sm" borderRadius="lg" overflow="hidden">
         {loading ? (
@@ -223,6 +279,11 @@ export default function Users() {
           <Box p={8} textAlign="center">
             <Text fontSize="lg" fontWeight="medium">No users found</Text>
             <Text color="gray.500" mt={2}>Try adjusting your search or filters</Text>
+            {users.length > 0 && (
+              <Text color="blue.500" mt={4} fontSize="sm">
+                There are {users.length} users in the database but none match your filters
+              </Text>
+            )}
           </Box>
         ) : (
           <Box overflowX="auto">
@@ -324,10 +385,10 @@ export default function Users() {
                       }
                     </Td>
                     <Td>
-                      {safeFormatDate(user.last_interaction, 'MMM dd, yyyy', 'Never')}
+                      {renderDate(user.last_interaction, 'MMM dd, yyyy', 'Never')}
                     </Td>
                     <Td>
-                      {safeFormatDate(user.created_at, 'MMM dd, yyyy', 'Unknown')}
+                      {renderDate(user.created_at, 'MMM dd, yyyy', 'Unknown')}
                     </Td>
                     <Td>
                       <NextLink href={`/users/${user.id}`} passHref>
