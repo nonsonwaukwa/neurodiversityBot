@@ -53,11 +53,12 @@ export default function Users() {
   const [sortDirection, setSortDirection] = useState('desc');
   const [statusFilter, setStatusFilter] = useState('all');
   const [instanceFilter, setInstanceFilter] = useState('all');
+  const [refreshKey, setRefreshKey] = useState(0);
   const toast = useToast();
 
   useEffect(() => {
     fetchUsers();
-  }, []);
+  }, [refreshKey]);
 
   useEffect(() => {
     try {
@@ -195,10 +196,10 @@ export default function Users() {
   };
 
   const handleRefresh = () => {
-    fetchUsers();
+    setRefreshKey(oldKey => oldKey + 1);
     toast({
-      title: 'Refreshing user data',
-      status: 'info',
+      title: "Refreshing data",
+      status: "info",
       duration: 2000,
       isClosable: true,
     });

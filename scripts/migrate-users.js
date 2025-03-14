@@ -4,7 +4,7 @@ const admin = require('firebase-admin');
 
 // Initialize Firebase admin with your service account
 // You'll need to download your service account key from Firebase console
-const serviceAccount = require('../serviceAccountKey.json');
+const serviceAccount = require('../config/neurodiversitybot-firebase-adminsdk-fbsvc-e442ab6d6a.json');
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
