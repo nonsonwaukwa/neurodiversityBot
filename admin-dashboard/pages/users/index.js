@@ -29,6 +29,7 @@ import {
   Alert,
   AlertIcon,
   Code,
+  Tag,
 } from '@chakra-ui/react';
 import { 
   FiSearch, 
@@ -37,7 +38,8 @@ import {
   FiEye, 
   FiChevronUp, 
   FiChevronDown,
-  FiRefreshCw
+  FiRefreshCw,
+  FiServer
 } from 'react-icons/fi';
 
 export default function Users() {
@@ -50,6 +52,7 @@ export default function Users() {
   const [sortField, setSortField] = useState('created_at');
   const [sortDirection, setSortDirection] = useState('desc');
   const [statusFilter, setStatusFilter] = useState('all');
+  const [instanceFilter, setInstanceFilter] = useState('all');
   const toast = useToast();
 
   useEffect(() => {
@@ -72,13 +75,19 @@ export default function Users() {
         result = result.filter(user => user.active === (statusFilter === 'active'));
       }
       
+      // Apply instance filter
+      if (instanceFilter !== 'all') {
+        result = result.filter(user => user.instance === instanceFilter);
+      }
+      
       // Apply search filter (on id, phone number, or state)
       if (searchQuery) {
         const query = searchQuery.toLowerCase();
         result = result.filter(user => 
           (user.id && user.id.toLowerCase().includes(query)) ||
           (user.phone_number && typeof user.phone_number === 'string' && user.phone_number.toLowerCase().includes(query)) ||
-          (user.state && user.state.toLowerCase().includes(query))
+          (user.state && user.state.toLowerCase().includes(query)) ||
+          (user.instance && user.instance.toLowerCase().includes(query))
         );
       }
       
@@ -127,12 +136,13 @@ export default function Users() {
       console.error("Error filtering/sorting users:", err);
       setDebugInfo(JSON.stringify({ error: err.message, stack: err.stack }));
     }
-  }, [users, searchQuery, statusFilter, sortField, sortDirection]);
+  }, [users, searchQuery, statusFilter, instanceFilter, sortField, sortDirection]);
 
   const fetchUsers = async () => {
     setLoading(true);
     try {
-      const usersSnapshot = await getDocs(collection(db, 'instances/instance1/users'));
+      // Fetch from the new unified users collection
+      const usersSnapshot = await getDocs(collection(db, 'users'));
       
       if (usersSnapshot.empty) {
         console.log('No users found in collection');
@@ -144,13 +154,19 @@ export default function Users() {
       const userData = usersSnapshot.docs.map(doc => {
         const data = doc.data();
         console.log(`User ${doc.id} data:`, data);
+        console.log(`User ${doc.id} instance:`, data.instance);
         return {
           id: doc.id,
           ...data
         };
       });
       
+      // Log instance information
+      const instancesFound = [...new Set(userData.map(user => user.instance).filter(Boolean))];
+      console.log('Instances found:', instancesFound);
+      console.log('Users without instance field:', userData.filter(user => !user.instance).length);
       console.log('All fetched users:', userData);
+      
       setUsers(userData);
       setLoading(false);
     } catch (err) {
@@ -198,6 +214,9 @@ export default function Users() {
     }
   };
 
+  // Get unique instances for the filter dropdown
+  const instances = [...new Set(users.map(user => user.instance).filter(Boolean))];
+
   return (
     <DashboardLayout>
       <Box mb={6}>
@@ -231,9 +250,23 @@ export default function Users() {
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
           >
-            <option value="all">All Users</option>
+            <option value="all">All Status</option>
             <option value="active">Active</option>
             <option value="inactive">Inactive</option>
+          </Select>
+          
+          <Select
+            icon={<FiServer />}
+            width="150px"
+            value={instanceFilter}
+            onChange={(e) => setInstanceFilter(e.target.value)}
+          >
+            <option value="all">All Instances</option>
+            {instances.map(instance => (
+              <option key={instance} value={instance}>
+                {instance}
+              </option>
+            ))}
           </Select>
         </HStack>
         
@@ -310,6 +343,16 @@ export default function Users() {
                       )}
                     </Flex>
                   </Th>
+                  <Th cursor="pointer" onClick={() => handleSort('instance')}>
+                    <Flex align="center">
+                      Instance
+                      {sortField === 'instance' && (
+                        <Box ml={1}>
+                          {sortDirection === 'asc' ? <FiChevronUp /> : <FiChevronDown />}
+                        </Box>
+                      )}
+                    </Flex>
+                  </Th>
                   <Th cursor="pointer" onClick={() => handleSort('state')}>
                     <Flex align="center">
                       State
@@ -369,6 +412,15 @@ export default function Users() {
                       </Flex>
                     </Td>
                     <Td>{user.phone_number || 'N/A'}</Td>
+                    <Td>
+                      <Tag
+                        size="sm"
+                        colorScheme={user.instance === 'instance1' ? 'blue' : 'purple'}
+                        variant="solid"
+                      >
+                        {user.instance || 'unknown'}
+                      </Tag>
+                    </Td>
                     <Td>
                       <Badge colorScheme={
                         user.state === 'onboarding' ? 'purple' :
