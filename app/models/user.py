@@ -63,3 +63,4 @@ class User:
         self.last_weekly_checkin = datetime.now().isoformat()
         self.last_week_sentiment = sentiment_data
         self.save() 
+ 

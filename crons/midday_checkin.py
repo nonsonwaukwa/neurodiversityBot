@@ -1,10 +1,9 @@
 import os
 import sys
-from pathlib import Path
 
-# Add the project root directory to the Python path
-project_root = str(Path(__file__).parent)
-sys.path.append(project_root)
+# Add the current directory to the Python path
+current_dir = os.path.dirname(os.path.abspath(__file__))
+sys.path.append(current_dir)
 
 from app.models.user import User
 from app.models.task import Task
