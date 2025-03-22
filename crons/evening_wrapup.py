@@ -1,3 +1,11 @@
+import os
+import sys
+from pathlib import Path
+
+# Add the project root directory to the Python path
+project_root = str(Path(__file__).parent)
+sys.path.append(project_root)
+
 from app.models.user import User
 from app.models.task import Task
 from app.models.checkin import CheckIn
