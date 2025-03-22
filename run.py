@@ -30,5 +30,8 @@ if __name__ == '__main__':
     scheduler_thread = threading.Thread(target=schedule_reminders, daemon=True)
     scheduler_thread.start()
     
+    # Get port from environment variable or default to 5000
+    port = int(os.getenv('PORT', 5000))
+    
     # Start the Flask application
-    app.run(host='0.0.0.0', port=int(os.getenv('PORT', 5000))) 
+    app.run(host='0.0.0.0', port=port) 
