@@ -191,6 +191,130 @@ def process_message(user_id: str, message_text: str, instance_id: str, services:
     # Get user's current state
     user_state = services['task'].get_user_state(user_id, instance_id)
     
+    # Handle weekly reflection (Sunday check-in)
+    if user_state == 'WEEKLY_REFLECTION':
+        # Analyze sentiment to understand emotional state
+        sentiment = services['sentiment'].analyze_sentiment(message_text)
+        
+        # Store sentiment data
+        user = User(user_id, services['task'].get_user_name(user_id, instance_id))
+        user.update_weekly_checkin(sentiment)
+        
+        # Determine planning schedule based on sentiment
+        stress_level = sentiment.get('stress_level', 'medium')
+        energy_level = sentiment.get('energy_level', 'medium')
+        emotions = sentiment.get('emotions', [])
+        
+        # Check if the response contains enough reflection
+        has_reflection = len(message_text.split()) > 10  # Basic check for a meaningful response
+        
+        if not has_reflection:
+            return (
+                "I want to make sure I understand how you're feeling about the week ahead. "
+                "Could you share a bit more about your current state? "
+                "You can send a voice note or text - whatever feels easier. 💭"
+            )
+
+        # Automatically determine planning approach based on sentiment
+        is_overwhelmed = (
+            stress_level == 'high' or 
+            energy_level == 'low' or 
+            any(emotion in ['overwhelmed', 'stressed', 'exhausted', 'anxious', 'burnt out'] for emotion in emotions)
+        )
+
+        if is_overwhelmed:
+            # Switch to daily planning for overwhelmed users
+            user.update_planning_schedule('daily')
+            services['task'].update_user_state(user_id, 'INITIAL_CHECK_IN', instance_id)
+            return (
+                "I hear that things are feeling quite heavy right now. Let's take it one day at a time - "
+                "that's often the most supportive approach when we're feeling overwhelmed. 💝\n\n"
+                "I'll check in with you each morning to see how you're feeling, and we can focus on whatever "
+                "feels manageable that day - even if it's just basic self-care.\n\n"
+                "For now, how are you feeling about today? No pressure to do anything - just checking in. 💭"
+            )
+        else:
+            # Set up weekly planning for users who are okay or neutral
+            user.update_planning_schedule('weekly')
+            services['task'].update_user_state(user_id, 'WEEKLY_TASK_SELECTION', instance_id)
+            return (
+                "Thanks for sharing! Based on what you've shared, it seems like you're in a good space "
+                "to think about the week ahead. 🌱\n\n"
+                "What are 2-3 main things you'd like to work towards this week? They can be as small as you need.\n\n"
+                "Remember, these are flexible guidelines - we can always adjust them based on how you're feeling each day."
+            )
+    
+    # Handle weekly check-in response (after reflection)
+    elif user_state == 'WEEKLY_CHECK_IN':
+        # Check for planning preference
+        preference = message_text.strip().lower()
+        
+        if '1' in preference or 'day' in preference or 'daily' in preference:
+            # User prefers daily planning
+            user = User(user_id, services['task'].get_user_name(user_id, instance_id))
+            user.update_planning_schedule('daily')
+            services['task'].update_user_state(user_id, 'INITIAL_CHECK_IN', instance_id)
+            return (
+                "We'll take it day by day - sometimes that's the most compassionate approach. 💚\n\n"
+                "I'll check in with you each morning to see how you're feeling and what feels manageable.\n\n"
+                "For now, how are you feeling about today? No pressure to do anything - just checking in. 💭"
+            )
+        elif '2' in preference or 'week' in preference or 'goal' in preference:
+            # User wants to set weekly goals
+            user = User(user_id, services['task'].get_user_name(user_id, instance_id))
+            user.update_planning_schedule('weekly')
+            services['task'].update_user_state(user_id, 'WEEKLY_TASK_SELECTION', instance_id)
+            return (
+                "Let's set some gentle goals for the week! 🌱\n\n"
+                "What are 2-3 things you'd like to work towards? They can be as small as you need.\n\n"
+                "Remember, these are flexible guidelines, not strict rules. We can adjust them anytime based on how you're feeling."
+            )
+        elif '3' in preference or 'rest' in preference or 'care' in preference:
+            # User needs rest and self-care
+            user = User(user_id, services['task'].get_user_name(user_id, instance_id))
+            user.update_planning_schedule('daily')
+            services['task'].update_user_state(user_id, 'INITIAL_CHECK_IN', instance_id)
+            return (
+                "Taking time for rest and self-care is so important. 💝\n\n"
+                "I'll check in gently each day, but there's no pressure to do anything you don't feel up to.\n\n"
+                "For now, how are you feeling? And is there anything small I can support you with today? 💭"
+            )
+        else:
+            return (
+                "I want to make sure I understand your preference for this week. Could you let me know if you'd prefer:\n\n"
+                "1. Daily check-ins (taking it day by day)\n"
+                "2. Setting some weekly goals\n"
+                "3. Focusing on rest and self-care\n\n"
+                "Just reply with the number or type that feels right for you. 💭"
+            )
+    
+    # Handle weekly task selection
+    elif user_state == 'WEEKLY_TASK_SELECTION':
+        # Parse tasks from message
+        tasks = [task.strip() for task in message_text.split('\n') if task.strip()]
+        
+        if not tasks:
+            return (
+                "I don't see any specific tasks there. Would you like to share what you're hoping to focus on this week? "
+                "Even small things count - like 'drink more water' or 'take short walks'. 💫"
+            )
+        
+        # Store weekly tasks
+        user = User(user_id, services['task'].get_user_name(user_id, instance_id))
+        user.set_weekly_tasks(tasks[:3])  # Limit to 3 main tasks
+        
+        # Format task list
+        task_list = '\n'.join([f"{i+1}. {task}" for i, task in enumerate(tasks[:3])])
+        
+        services['task'].update_user_state(user_id, 'CHECK_IN', instance_id)
+        return (
+            f"Perfect! Here are your focus areas for this week:\n\n{task_list}\n\n"
+            "I'll check in with you each day to see how you're doing with these. "
+            "Remember, it's okay if some days you can only do a little bit - progress isn't linear! "
+            "We can always adjust these based on your energy and capacity.\n\n"
+            "How are you feeling about getting started with these? 💭"
+        )
+    
     # If new user, create profile and send welcome message
     if user_state == 'SETUP':
         services['task'].create_user(user_id, instance_id, user_id)  # Using user_id as phone number for now
@@ -206,6 +330,25 @@ def process_message(user_id: str, message_text: str, instance_id: str, services:
         # Analyze sentiment to understand emotional state
         sentiment = services['sentiment'].analyze_sentiment(message_text)
         
+        # Check if the response contains enough information about their feelings
+        emotions = sentiment.get('emotions', [])
+        energy_level = sentiment.get('energy_level', None)
+        has_feeling_info = (
+            len(emotions) > 0 or 
+            energy_level is not None or 
+            any(keyword in message_text.lower() for keyword in [
+                'feel', 'feeling', 'felt', 'tired', 'energetic', 'exhausted', 'good', 'bad',
+                'okay', 'ok', 'meh', 'great', 'terrible', 'stressed', 'calm', 'anxious',
+                'happy', 'sad', 'overwhelmed', 'fine', 'alright'
+            ])
+        )
+        
+        if not has_feeling_info:
+            return (
+                "I want to make sure I understand how you're feeling before we move forward. Could you tell me a bit more about your energy level or mood? "
+                "For example, are you feeling energetic, tired, stressed, calm? There's no right answer - I just want to support you better! 💭"
+            )
+        
         # Store sentiment data for later reference
         try:
             user_ref = services['task'].db.collection('instances').document(instance_id).collection('users').document(user_id)
@@ -214,7 +357,6 @@ def process_message(user_id: str, message_text: str, instance_id: str, services:
                 'last_check_in': datetime.now().isoformat()
             })
         except Exception:
-            # Fallback if database update fails
             print(f"Failed to store sentiment data for user {user_id}")
         
         # Personalized response based on sentiment

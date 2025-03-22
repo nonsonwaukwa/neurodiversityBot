@@ -51,7 +51,7 @@ class TaskService:
             'tasks': [],
             'last_interaction': datetime.now(),
             'phone_number': phone_number,
-            'instance_id': instance_id,
+            'instance': instance_id,  # Changed from instance_id to instance to match unified collection
             'conversation_history': [],
             'metrics': {
                 'total_tasks': 0,
@@ -62,8 +62,13 @@ class TaskService:
         
         try:
             if self.use_firestore:
-                user_ref = self.db.collection('instances').document(instance_id).collection('users').document(user_id)
-                user_ref.set(user_data)
+                # Save to instance-specific collection
+                instance_user_ref = self.db.collection('instances').document(instance_id).collection('users').document(user_id)
+                instance_user_ref.set(user_data)
+                
+                # Save to unified collection
+                unified_user_ref = self.db.collection('users').document(user_id)
+                unified_user_ref.set(user_data)
             else:
                 # Fallback to in-memory storage
                 instance_key = f"{instance_id}:{user_id}"
@@ -76,13 +81,20 @@ class TaskService:
         
     def update_user_state(self, user_id: str, state: str, instance_id: str = 'default') -> None:
         """Update the user's current state."""
+        update_data = {
+            'state': state,
+            'last_interaction': datetime.now()
+        }
+        
         try:
             if self.use_firestore:
-                user_ref = self.db.collection('instances').document(instance_id).collection('users').document(user_id)
-                user_ref.update({
-                    'state': state,
-                    'last_interaction': datetime.now()
-                })
+                # Update instance-specific collection
+                instance_user_ref = self.db.collection('instances').document(instance_id).collection('users').document(user_id)
+                instance_user_ref.update(update_data)
+                
+                # Update unified collection
+                unified_user_ref = self.db.collection('users').document(user_id)
+                unified_user_ref.update(update_data)
             else:
                 # Fallback to in-memory storage
                 instance_key = f"{instance_id}:{user_id}"
@@ -103,14 +115,21 @@ class TaskService:
         # Format tasks with status
         formatted_tasks = [{'task': task, 'status': 'pending'} for task in tasks]
         
+        update_data = {
+            'tasks': formatted_tasks,
+            'state': 'CHECK_IN',
+            'last_interaction': datetime.now()
+        }
+        
         try:
             if self.use_firestore:
-                user_ref = self.db.collection('instances').document(instance_id).collection('users').document(user_id)
-                user_ref.update({
-                    'tasks': formatted_tasks,
-                    'state': 'CHECK_IN',
-                    'last_interaction': datetime.now()
-                })
+                # Update instance-specific collection
+                instance_user_ref = self.db.collection('instances').document(instance_id).collection('users').document(user_id)
+                instance_user_ref.update(update_data)
+                
+                # Update unified collection
+                unified_user_ref = self.db.collection('users').document(user_id)
+                unified_user_ref.update(update_data)
                 
                 # Create a task history entry
                 history_ref = self.db.collection('instances').document(instance_id).collection('task_history')
@@ -160,8 +179,9 @@ class TaskService:
         """Update the status of a specific task."""
         try:
             if self.use_firestore:
-                user_ref = self.db.collection('instances').document(instance_id).collection('users').document(user_id)
-                user_doc = user_ref.get()
+                # Get current user data from instance-specific collection
+                instance_user_ref = self.db.collection('instances').document(instance_id).collection('users').document(user_id)
+                user_doc = instance_user_ref.get()
                 
                 if not user_doc.exists:
                     return
@@ -178,11 +198,16 @@ class TaskService:
                         metrics['completed_tasks'] = metrics.get('completed_tasks', 0) + 1
                         metrics['completion_rate'] = (metrics['completed_tasks'] / metrics['total_tasks']) * 100 if metrics['total_tasks'] > 0 else 0
                     
-                    user_ref.update({
+                    update_data = {
                         'tasks': tasks,
                         'last_interaction': datetime.now(),
                         'metrics': metrics
-                    })
+                    }
+                    
+                    # Update both collections
+                    instance_user_ref.update(update_data)
+                    unified_user_ref = self.db.collection('users').document(user_id)
+                    unified_user_ref.update(update_data)
             else:
                 # Fallback to in-memory storage
                 instance_key = f"{instance_id}:{user_id}"

@@ -5,6 +5,8 @@ env/
 __pycache__/
 *.py[cod]
 *$py.class
+node_modules/
+
 
 # Firebase credentials
 config/*.json
