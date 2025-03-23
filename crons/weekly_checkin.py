@@ -1,14 +1,15 @@
 import os
 import sys
+from pathlib import Path
 
-# Add the current directory to the Python path
-current_dir = os.path.dirname(os.path.abspath(__file__))
-sys.path.append(current_dir)
+# Add the project root directory to the Python path
+project_root = str(Path(__file__).parent.parent)
+sys.path.append(project_root)
 
 from app.models.user import User
 from app.models.checkin import CheckIn
-from app.services.whatsapp import get_whatsapp_service
-from app.services.sentiment import SentimentService
+from app.services.whatsapp_service import get_whatsapp_service
+from app.services.sentiment_service import SentimentService
 import logging
 from datetime import datetime
 
@@ -40,7 +41,8 @@ def send_weekly_checkin():
     
     # Process each account
     for account_index, account_users in users_by_account.items():
-        whatsapp_service = get_whatsapp_service(account_index)
+        instance_id = f'instance{account_index}'
+        whatsapp_service = get_whatsapp_service(instance_id)
         
         for user in account_users:
             try:

@@ -2,11 +2,17 @@ from flask import Blueprint, request, jsonify
 from app.services.whatsapp_service import WhatsAppService
 from app.services.sentiment_service import SentimentService
 from app.services.task_service import TaskService
+from app.models.user import User
 import os
 import re
 import time
 from datetime import datetime, timedelta
 import random
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 bp = Blueprint('whatsapp', __name__, url_prefix='/webhook')
 
@@ -78,101 +84,142 @@ def verify_webhook():
 
 @bp.route('/', methods=['POST'])
 def webhook():
-    """Handle incoming messages from all WhatsApp instances"""
-    data = request.get_json()
-    print(f"Received webhook data:", data)
-
+    """Handle incoming webhook events from WhatsApp."""
     try:
-        # Clean the message cache periodically
-        if len(message_cache) > 100:  # If cache gets too large
+        data = request.get_json()
+        logger.info(f"Received webhook data: {data}")
+        
+        # Check if this is a message event
+        if 'entry' not in data:
+            logger.warning("No 'entry' field in webhook data")
+            return jsonify({'status': 'ok'})
+            
+        if not data['entry']:
+            logger.warning("'entry' array is empty in webhook data")
+            return jsonify({'status': 'ok'})
+            
+        for entry in data['entry']:
+            if 'changes' not in entry:
+                logger.warning(f"No 'changes' field in entry: {entry}")
+                continue
+                
+            for change in entry['changes']:
+                if 'value' not in change:
+                    logger.warning(f"No 'value' field in change: {change}")
+                    continue
+                    
+                value = change['value']
+                logger.info(f"Processing value: {value}")
+                
+                # Handle message events
+                if 'messages' in value:
+                    for message in value['messages']:
+                        if message.get('type') == 'text':
+                            user_id = message.get('from')
+                            message_text = message.get('text', {}).get('body')
+                            message_id = message.get('id')
+                            
+                            # Check for message deduplication
+                            if message_id in message_cache:
+                                logger.info(f"Skipping duplicate message {message_id}")
+                                continue
+                                
+                            # Add message to cache
+                            message_cache[message_id] = {
+                                'timestamp': time.time(),
+                                'processed': False
+                            }
+                            
+                            # Determine instance based on phone number ID
+                            phone_number_id = value.get('metadata', {}).get('phone_number_id')
+                            instance_id = get_instance_from_phone_number(phone_number_id)
+                            
+                            if not instance_id:
+                                logger.error(f"Unknown phone number ID: {phone_number_id}")
+                                continue
+                                
+                            logger.info(f"Processing message {message_id} for instance {instance_id}")
+                            logger.info(f"Message text: {message_text}")
+                            
+                            # Process the message
+                            try:
+                                process_message(user_id, message_text, instance_id, instances[instance_id])
+                                message_cache[message_id]['processed'] = True
+                                logger.info(f"Successfully processed message {message_id}")
+                            except Exception as e:
+                                logger.error(f"Error processing message {message_id}: {str(e)}")
+                                raise
+                else:
+                    logger.info(f"No 'messages' field in value. This might be a status update or different type of webhook event.")
+                    # Check if this is a status update
+                    if 'statuses' in value:
+                        logger.info(f"Received status update: {value['statuses']}")
+        
+        # Clean message cache periodically
+        if random.random() < 0.1:  # 10% chance to clean on each webhook
             clean_message_cache()
             
-        # Check if this is a WhatsApp message
-        if data and 'entry' in data and data['entry']:
-            entry = data['entry'][0]
-            if 'changes' in entry and entry['changes']:
-                change = entry['changes'][0]
-                if 'value' in change and 'messages' in change['value']:
-                    # Extract message details
-                    value = change['value']
-                    message = value['messages'][0]
-                    message_id = message['id']
-                    user_id = message['from']
-                    
-                    # Check message type
-                    if 'text' in message and 'body' in message['text']:
-                        message_text = message['text']['body']
-                    elif 'image' in message:
-                        # Handle image message
-                        message_text = "[IMAGE] Image received. I can only process text messages at the moment."
-                    elif 'audio' in message:
-                        # Handle audio message
-                        message_text = "[AUDIO] Audio received. I can only process text messages at the moment."
-                    elif 'video' in message:
-                        # Handle video message
-                        message_text = "[VIDEO] Video received. I can only process text messages at the moment."
-                    elif 'document' in message:
-                        # Handle document message
-                        message_text = "[DOCUMENT] Document received. I can only process text messages at the moment."
-                    elif 'location' in message:
-                        # Handle location message
-                        message_text = "[LOCATION] Location received. I can only process text messages at the moment."
-                    else:
-                        # Unknown message type
-                        message_text = "I received your message but couldn't understand the format. Please send text messages only."
-                    
-                    # Check for duplicate message
-                    if message_id in message_cache:
-                        print(f"Duplicate message {message_id} detected. Skipping processing.")
-                        return jsonify({'status': 'duplicate_message_ignored'}), 200
-                    
-                    # Add message to cache
-                    message_cache[message_id] = {
-                        'timestamp': time.time(),
-                        'processed': False
-                    }
-                    
-                    # Determine which instance this message belongs to
-                    recipient_id = value.get('metadata', {}).get('phone_number_id')
-                    instance_id = get_instance_from_phone_number(recipient_id)
-                    
-                    # Check if instance exists
-                    if instance_id not in instances:
-                        print(f"Error: Instance {instance_id} not found. Using instance1 as fallback.")
-                        instance_id = 'instance1'
-                    
-                    # Get services for this instance
-                    services = instances[instance_id]
-                    
-                    print(f"Processing message {message_id} for instance {instance_id}")
-                    
-                    # Process the message based on user's state
-                    response = process_message(user_id, message_text, instance_id, services)
-                    
-                    # Send response back to user
-                    services['whatsapp'].send_message(user_id, response)
-                    
-                    # Log the conversation
-                    services['task'].log_conversation(user_id, message_text, response, instance_id)
-                    
-                    # Mark message as processed
-                    message_cache[message_id]['processed'] = True
-                    
-                    return jsonify({'status': 'success'}), 200
-                else:
-                    print("Webhook received but no messages found in the payload")
-            else:
-                print("Webhook received but no changes found in the entry")
-        else:
-            print("Webhook received but no entry found in the data")
-
-        return jsonify({'status': 'no_message'}), 200
-
+        return jsonify({'status': 'ok'})
+        
     except Exception as e:
-        print(f"Error processing webhook: {str(e)}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"Error processing webhook: {str(e)}")
         return jsonify({'status': 'error', 'message': str(e)}), 500
+
+def get_instance_id(phone_number_id: str) -> str:
+    """Map phone number ID to instance ID."""
+    phone_number_mapping = {
+        '556928390841439': 'instance1',
+        '596255043571188': 'instance2'
+    }
+    return phone_number_mapping.get(phone_number_id)
+
+def generate_response(user: User, sentiment_data: dict) -> str:
+    """Generate a response based on sentiment analysis."""
+    name = user.name.split('_')[0] if '_' in user.name else user.name
+    
+    if sentiment_data.get('energy_level') == 'low':
+        return (
+            f"I hear you, {name}. It sounds like your energy is a bit low today, "
+            "and that's completely okay. 💙\n\n"
+            "Would you like to:\n"
+            "1. Just rest and pick this up later?\n"
+            "2. Break down your tasks into smaller, more manageable steps?\n"
+            "3. Focus on just one simple task for now?\n\n"
+            "You can reply with the number that feels right, or we can just chat about how you're feeling."
+        )
+    
+    # Add more response types based on other sentiment patterns
+    return None
+
+def process_message(user_id: str, message_text: str, instance_id: str, services: dict):
+    """Process an incoming message from a user."""
+    logger.info(f"Processing message from user {user_id} in instance {instance_id}")
+    
+    try:
+        # Get or create user
+        user = User.get_or_create(user_id, instance_id)
+        if not user:
+            logger.error(f"Failed to get/create user {user_id}")
+            return
+            
+        # Get sentiment analysis
+        sentiment_data = services['sentiment'].analyze_sentiment(message_text)
+        logger.info(f"Sentiment analysis result: {sentiment_data}")
+        
+        # Update user state based on sentiment
+        user.update_weekly_checkin(sentiment_data)
+        
+        # Generate response based on sentiment
+        response_message = generate_response(user, sentiment_data)
+        
+        # Send response
+        if response_message:
+            services['whatsapp'].send_message(user_id, response_message)
+            logger.info(f"Sent response to user {user_id}")
+            
+    except Exception as e:
+        logger.error(f"Error processing message: {str(e)}")
+        raise
 
 # For backward compatibility, redirect instance-specific routes to the main webhook
 @bp.route('/<instance_id>', methods=['GET'])

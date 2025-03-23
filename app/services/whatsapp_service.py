@@ -8,10 +8,23 @@ class WhatsAppService:
     def __init__(self, instance_id: str = 'default'):
         self.instance_id = instance_id
         self.api_version = 'v17.0'
-        self.phone_number_id = os.getenv(f'WHATSAPP_PHONE_NUMBER_ID_{instance_id.upper()}', 
-                                       os.getenv('WHATSAPP_PHONE_NUMBER_ID'))
-        self.access_token = os.getenv(f'WHATSAPP_TOKEN_{instance_id.upper()}',
-                                    os.getenv('WHATSAPP_TOKEN'))
+        
+        # Try both formats of environment variables
+        self.phone_number_id = (
+            os.getenv(f'WHATSAPP_PHONE_NUMBER_ID_{instance_id.upper()}') or  # WHATSAPP_PHONE_NUMBER_ID_INSTANCE1
+            os.getenv(f'WHATSAPP_PHONE_NUMBER_ID_{instance_id[-1]}') or      # WHATSAPP_PHONE_NUMBER_ID_1
+            os.getenv('WHATSAPP_PHONE_NUMBER_ID')                            # Fallback
+        )
+        
+        self.access_token = (
+            os.getenv(f'WHATSAPP_TOKEN_{instance_id.upper()}') or           # WHATSAPP_TOKEN_INSTANCE1
+            os.getenv(f'WHATSAPP_ACCESS_TOKEN_{instance_id[-1]}') or        # WHATSAPP_ACCESS_TOKEN_1
+            os.getenv('WHATSAPP_TOKEN')                                     # Fallback
+        )
+        
+        if not self.phone_number_id or not self.access_token:
+            raise ValueError(f"Missing WhatsApp credentials for instance {instance_id}")
+            
         self.base_url = f'https://graph.facebook.com/{self.api_version}/{self.phone_number_id}'
 
     def send_message(self, to: str, message: str) -> Dict[str, Any]:
@@ -198,4 +211,8 @@ class WhatsAppService:
             f"What's one thing you feel good about from today?"
         )
         
-        return self.send_message(to, message) 
+        return self.send_message(to, message)
+
+def get_whatsapp_service(instance_id: str = 'instance1') -> WhatsAppService:
+    """Get a WhatsApp service instance for the given instance ID."""
+    return WhatsAppService(instance_id) 
