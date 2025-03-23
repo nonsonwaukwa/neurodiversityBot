@@ -71,9 +71,39 @@ def create_app():
     # Add health check endpoint
     @app.route('/health')
     def health_check():
-        return jsonify({
+        health_status = {
             'status': 'healthy',
-            'timestamp': datetime.now().isoformat()
-        })
+            'timestamp': datetime.now().isoformat(),
+            'services': {}
+        }
+        
+        # Check Firebase connection
+        try:
+            from firebase_admin import db
+            # Try to access a test reference
+            ref = db.reference('health_check')
+            ref.set({'last_check': datetime.now().isoformat()})
+            health_status['services']['firebase'] = 'healthy'
+        except Exception as e:
+            health_status['services']['firebase'] = f'unhealthy: {str(e)}'
+            health_status['status'] = 'degraded'
+        
+        # Check WhatsApp service configuration
+        try:
+            instance1_token = os.getenv('WHATSAPP_TOKEN_INSTANCE1') or os.getenv('WHATSAPP_ACCESS_TOKEN_1')
+            instance2_token = os.getenv('WHATSAPP_TOKEN_INSTANCE2') or os.getenv('WHATSAPP_ACCESS_TOKEN_2')
+            
+            if not instance1_token or not instance2_token:
+                raise ValueError("Missing WhatsApp tokens")
+                
+            health_status['services']['whatsapp'] = 'healthy'
+        except Exception as e:
+            health_status['services']['whatsapp'] = f'unhealthy: {str(e)}'
+            health_status['status'] = 'degraded'
+        
+        # Set response code based on overall status
+        status_code = 200 if health_status['status'] == 'healthy' else 503
+        
+        return jsonify(health_status), status_code
 
     return app 

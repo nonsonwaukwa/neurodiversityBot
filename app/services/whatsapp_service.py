@@ -5,7 +5,7 @@ import json
 import random
 
 class WhatsAppService:
-    def __init__(self, instance_id: str = 'default'):
+    def __init__(self, instance_id: str = 'instance1'):
         self.instance_id = instance_id
         self.api_version = 'v17.0'
         
@@ -23,12 +23,19 @@ class WhatsAppService:
         )
         
         if not self.phone_number_id or not self.access_token:
-            raise ValueError(f"Missing WhatsApp credentials for instance {instance_id}")
-            
-        self.base_url = f'https://graph.facebook.com/{self.api_version}/{self.phone_number_id}'
+            print(f"Warning: Missing WhatsApp credentials for instance {instance_id}")
+            print("Available environment variables:", [k for k in os.environ.keys() if 'WHATSAPP' in k])
+            self.is_configured = False
+        else:
+            self.is_configured = True
+            self.base_url = f'https://graph.facebook.com/{self.api_version}/{self.phone_number_id}'
 
     def send_message(self, to: str, message: str) -> Dict[str, Any]:
         """Send a message to a WhatsApp user."""
+        if not self.is_configured:
+            print(f"Warning: WhatsApp service for instance {self.instance_id} is not properly configured")
+            return {'error': 'WhatsApp service not configured'}
+            
         headers = {
             'Authorization': f'Bearer {self.access_token}',
             'Content-Type': 'application/json'

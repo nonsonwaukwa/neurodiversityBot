@@ -334,4 +334,35 @@ class TaskService:
                 return memory_storage['users'][instance_key].get('tasks', [])
         except Exception as e:
             print(f"Error getting daily tasks: {str(e)}")
-            return [] 
+            return []
+    
+    def get_user_name(self, user_id: str, instance_id: str = 'default') -> str:
+        """Get the user's name from their profile data."""
+        try:
+            if self.use_firestore:
+                # Try instance-specific collection first
+                instance_user_ref = self.db.collection('instances').document(instance_id).collection('users').document(user_id)
+                user_doc = instance_user_ref.get()
+                
+                if user_doc.exists:
+                    user_data = user_doc.to_dict()
+                    if user_data.get('name'):
+                        return user_data['name']
+                
+                # Try unified collection as fallback
+                unified_user_ref = self.db.collection('users').document(user_id)
+                user_doc = unified_user_ref.get()
+                
+                if user_doc.exists:
+                    user_data = user_doc.to_dict()
+                    return user_data.get('name', 'Friend')
+            else:
+                # Fallback to in-memory storage
+                instance_key = f"{instance_id}:{user_id}"
+                if instance_key in memory_storage['users']:
+                    return memory_storage['users'][instance_key].get('name', 'Friend')
+            
+            return 'Friend'  # Default fallback if no name is found
+        except Exception as e:
+            print(f"Error getting user name: {str(e)}")
+            return 'Friend'  # Default fallback on error 

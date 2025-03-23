@@ -1,13 +1,13 @@
 from app import create_app
 import schedule
 import time
-from app.services.whatsapp_service import WhatsAppService
+from app.services.whatsapp_service import get_whatsapp_service
 from app.services.task_service import TaskService
 from datetime import datetime
 import os
 
 app = create_app()
-whatsapp_service = WhatsAppService()
+whatsapp_service = get_whatsapp_service('instance1')  # Use instance1 by default
 task_service = TaskService()
 
 def send_daily_reminders():
