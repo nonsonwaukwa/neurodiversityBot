@@ -1,12 +1,23 @@
 import firebase_admin
 from firebase_admin import credentials, firestore
 import os
-from pathlib import Path
+import json
 
 # Initialize Firebase Admin SDK
-cred_path = os.path.join(Path(__file__).parent.parent.parent, 'config', 'neurodiversitybot-firebase-adminsdk-fbsvc-e442ab6d6a.json')
 if not firebase_admin._apps:
-    cred = credentials.Certificate(cred_path)
+    # Get credentials from environment variable
+    cred_json = os.getenv('FIREBASE_CREDENTIALS_JSON')
+    if not cred_json:
+        raise ValueError("FIREBASE_CREDENTIALS_JSON environment variable is not set")
+    
+    # Parse the JSON string into a dictionary
+    try:
+        cred_dict = json.loads(cred_json)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON in FIREBASE_CREDENTIALS_JSON: {str(e)}")
+    
+    # Initialize Firebase with the credentials
+    cred = credentials.Certificate(cred_dict)
     firebase_admin.initialize_app(cred)
 
 # Get Firestore database instance
