@@ -31,67 +31,48 @@ class TaskService:
                 if user_doc.exists:
                     user_data = user_doc.to_dict()
                     state = user_data.get('state', 'INITIAL')
-                    last_state_update = user_data.get('last_state_update')
-                    
-                    # Convert timestamp string to datetime if it exists
-                    if isinstance(last_state_update, str):
-                        try:
-                            last_state_update = datetime.fromisoformat(last_state_update)
-                        except ValueError:
-                            last_state_update = datetime.now(timezone.utc)
-                    elif last_state_update is None:
-                        last_state_update = datetime.now(timezone.utc)
-                        
                     return {
-                        'state': state,
-                        'last_state_update': last_state_update
+                        'state': state
                     }
                 else:
                     # Initialize new user state
-                    now = datetime.now(timezone.utc)
-                    self.update_user_state(user_id, 'INITIAL', instance_id)
                     return {
-                        'state': 'INITIAL',
-                        'last_state_update': now
+                        'state': 'INITIAL'
                     }
             else:
-                # Fallback to memory storage
-                user_key = f"{instance_id}_{user_id}"
-                if user_key not in memory_storage['users']:
-                    memory_storage['users'][user_key] = {
-                        'state': 'INITIAL',
-                        'last_state_update': datetime.now(timezone.utc)
-                    }
-                return memory_storage['users'][user_key]
+                # Use in-memory storage
+                user_key = f"{instance_id}:{user_id}"
+                user_data = memory_storage['users'].get(user_key, {})
+                return {
+                    'state': user_data.get('state', 'INITIAL')
+                }
                 
         except Exception as e:
             print(f"Error getting user state: {str(e)}")
             return {
-                'state': 'INITIAL',
-                'last_state_update': datetime.now(timezone.utc)
+                'state': 'INITIAL'
             }
-
+            
     def update_user_state(self, user_id: str, new_state: str, instance_id: str = 'default'):
         """Update the user's state in the system."""
         try:
-            now = datetime.now(timezone.utc)
             if self.use_firestore:
                 user_ref = self.db.collection('instances').document(instance_id).collection('users').document(user_id)
                 user_ref.set({
                     'state': new_state,
-                    'last_state_update': now.isoformat()
+                    'last_state_update': int(time.time())
                 }, merge=True)
             else:
-                # Fallback to memory storage
-                user_key = f"{instance_id}_{user_id}"
+                # Use in-memory storage
+                user_key = f"{instance_id}:{user_id}"
                 if user_key not in memory_storage['users']:
                     memory_storage['users'][user_key] = {}
-                memory_storage['users'][user_key].update({
-                    'state': new_state,
-                    'last_state_update': now
-                })
+                memory_storage['users'][user_key]['state'] = new_state
+                memory_storage['users'][user_key]['last_state_update'] = int(time.time())
+                
         except Exception as e:
             print(f"Error updating user state: {str(e)}")
+            raise
         
     def create_user(self, user_id: str, instance_id: str = 'default', phone_number: str = None) -> None:
         """Create a new user in the system."""
@@ -262,9 +243,9 @@ class TaskService:
                 user_data = user_doc.to_dict()
                 conversation_history = user_data.get('conversation_history', [])
                 
-                # Add new conversation entry
+                # Add new conversation entry with Unix timestamp
                 conversation_history.append({
-                    'timestamp': datetime.now().isoformat(),
+                    'timestamp': int(time.time()),
                     'message': message,
                     'response': response
                 })
@@ -275,7 +256,7 @@ class TaskService:
                     
                 user_ref.update({
                     'conversation_history': conversation_history,
-                    'last_interaction': datetime.now()
+                    'last_interaction': int(time.time())
                 })
             else:
                 # Fallback to in-memory storage
@@ -287,7 +268,7 @@ class TaskService:
                     memory_storage['users'][instance_key]['conversation_history'] = []
                 
                 memory_storage['users'][instance_key]['conversation_history'].append({
-                    'timestamp': datetime.now().isoformat(),
+                    'timestamp': int(time.time()),
                     'message': message,
                     'response': response
                 })
@@ -296,7 +277,7 @@ class TaskService:
                 if len(memory_storage['users'][instance_key]['conversation_history']) > 50:
                     memory_storage['users'][instance_key]['conversation_history'] = memory_storage['users'][instance_key]['conversation_history'][-50:]
                 
-                memory_storage['users'][instance_key]['last_interaction'] = datetime.now()
+                memory_storage['users'][instance_key]['last_interaction'] = int(time.time())
         except Exception as e:
             print(f"Error logging conversation: {str(e)}")
             # Continue without logging if there's an error
