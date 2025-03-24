@@ -3,6 +3,7 @@ from app.services.whatsapp_service import WhatsAppService
 from app.services.sentiment_service import SentimentService
 from app.services.task_service import TaskService
 from app.models.user import User
+from firebase_admin import firestore
 import os
 import re
 import time
@@ -24,6 +25,9 @@ for instance_id in ['instance1', 'instance2']:  # Add more instances as needed
         'sentiment': SentimentService(),
         'task': TaskService()
     }
+
+# Initialize Firestore
+db = firestore.client()
 
 # Phone number to instance mapping
 phone_number_mapping = {
@@ -66,6 +70,37 @@ def get_instance_from_phone_number(phone_number: str) -> str:
     print(f"Warning: No instance mapping found for phone number {phone_number}. Using instance1.")
     return 'instance1'
 
+def is_message_processed(message_id: str, instance_id: str) -> bool:
+    """Check if a message has already been processed using Firebase."""
+    try:
+        doc_ref = db.collection('processed_messages').document(message_id)
+        doc = doc_ref.get()
+        
+        if doc.exists:
+            # Check if message is too old (more than 24 hours)
+            message_data = doc.to_dict()
+            message_time = message_data.get('timestamp', 0)
+            if time.time() - message_time > 86400:  # 24 hours
+                logger.info(f"Message {message_id} is too old, skipping")
+                return True
+            return True
+        return False
+    except Exception as e:
+        logger.error(f"Error checking message status: {str(e)}")
+        return False
+
+def mark_message_processed(message_id: str, instance_id: str, timestamp: int):
+    """Mark a message as processed in Firebase."""
+    try:
+        doc_ref = db.collection('processed_messages').document(message_id)
+        doc_ref.set({
+            'instance_id': instance_id,
+            'timestamp': timestamp,
+            'processed_at': int(time.time())
+        })
+    except Exception as e:
+        logger.error(f"Error marking message as processed: {str(e)}")
+
 @bp.route('/', methods=['GET'])
 def verify_webhook():
     """Handle webhook verification from WhatsApp for all instances"""
@@ -89,23 +124,16 @@ def webhook():
         data = request.get_json()
         logger.info(f"Received webhook data: {data}")
         
-        # Check if this is a message event
-        if 'entry' not in data:
-            logger.warning("No 'entry' field in webhook data")
-            return jsonify({'status': 'ok'})
-            
-        if not data['entry']:
-            logger.warning("'entry' array is empty in webhook data")
+        if 'entry' not in data or not data['entry']:
+            logger.warning("No valid entry in webhook data")
             return jsonify({'status': 'ok'})
             
         for entry in data['entry']:
             if 'changes' not in entry:
-                logger.warning(f"No 'changes' field in entry: {entry}")
                 continue
                 
             for change in entry['changes']:
                 if 'value' not in change:
-                    logger.warning(f"No 'value' field in change: {change}")
                     continue
                     
                 value = change['value']
@@ -118,47 +146,30 @@ def webhook():
                             user_id = message.get('from')
                             message_text = message.get('text', {}).get('body')
                             message_id = message.get('id')
+                            timestamp = int(message.get('timestamp', time.time()))
                             
-                            # Check for message deduplication
-                            if message_id in message_cache:
-                                logger.info(f"Skipping duplicate message {message_id}")
-                                continue
-                                
-                            # Add message to cache
-                            message_cache[message_id] = {
-                                'timestamp': time.time(),
-                                'processed': False
-                            }
-                            
-                            # Determine instance based on phone number ID
+                            # Check for message deduplication using Firebase
                             phone_number_id = value.get('metadata', {}).get('phone_number_id')
                             instance_id = get_instance_from_phone_number(phone_number_id)
                             
-                            if not instance_id:
-                                logger.error(f"Unknown phone number ID: {phone_number_id}")
+                            if is_message_processed(message_id, instance_id):
+                                logger.info(f"Skipping duplicate message {message_id}")
                                 continue
-                                
+                            
                             logger.info(f"Processing message {message_id} for instance {instance_id}")
                             logger.info(f"Message text: {message_text}")
                             
-                            # Process the message
                             try:
                                 process_message(user_id, message_text, instance_id, instances[instance_id])
-                                message_cache[message_id]['processed'] = True
+                                mark_message_processed(message_id, instance_id, timestamp)
                                 logger.info(f"Successfully processed message {message_id}")
                             except Exception as e:
                                 logger.error(f"Error processing message {message_id}: {str(e)}")
                                 raise
-                else:
-                    logger.info(f"No 'messages' field in value. This might be a status update or different type of webhook event.")
-                    # Check if this is a status update
-                    if 'statuses' in value:
-                        logger.info(f"Received status update: {value['statuses']}")
+                                
+                elif 'statuses' in value:
+                    logger.info(f"Received status update: {value['statuses']}")
         
-        # Clean message cache periodically
-        if random.random() < 0.1:  # 10% chance to clean on each webhook
-            clean_message_cache()
-            
         return jsonify({'status': 'ok'})
         
     except Exception as e:
@@ -207,6 +218,11 @@ def process_message(user_id: str, message_text: str, instance_id: str, services:
         
         # Handle weekly reflection (Sunday check-in)
         if user_state == 'WEEKLY_REFLECTION':
+            # Check if we're already waiting for clarification
+            if user.last_state_update and (datetime.now() - user.last_state_update).seconds < 300:  # 5 minutes
+                logger.info(f"Already waiting for clarification from user {user_id}, skipping duplicate response")
+                return
+                
             # Analyze sentiment to understand emotional state
             analysis = services['sentiment'].analyze_weekly_checkin(message_text)
             logger.info(f"Weekly check-in analysis: {analysis}")
@@ -220,16 +236,20 @@ def process_message(user_id: str, message_text: str, instance_id: str, services:
             if planning_type:
                 user.update_planning_schedule(planning_type)
                 logger.info(f"Updated user {user_id} planning type to {planning_type}")
+                
+                # Update user state based on planning type
+                if planning_type == 'daily':
+                    services['task'].update_user_state(user_id, 'INITIAL_CHECK_IN', instance_id)
+                elif planning_type == 'weekly':
+                    services['task'].update_user_state(user_id, 'WEEKLY_TASK_SELECTION', instance_id)
+            else:
+                # If no planning type determined, we're asking for clarification
+                # Update the state timestamp to prevent duplicate clarification messages
+                user.update_user_state('WEEKLY_REFLECTION', force_timestamp_update=True)
             
             # Send response
             services['whatsapp'].send_message(user_id, response_message)
             logger.info(f"Sent weekly check-in response to user {user_id}")
-            
-            # Update user state based on planning type
-            if planning_type == 'daily':
-                services['task'].update_user_state(user_id, 'INITIAL_CHECK_IN', instance_id)
-            elif planning_type == 'weekly':
-                services['task'].update_user_state(user_id, 'WEEKLY_TASK_SELECTION', instance_id)
             
         else:
             # Handle other message types (daily check-ins, task updates, etc.)
