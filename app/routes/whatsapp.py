@@ -219,8 +219,16 @@ def process_message(user_id: str, message_text: str, instance_id: str, services:
     try:
         # Get user's current state
         user_state_data = services['task'].get_user_state(user_id, instance_id)
-        current_state = user_state_data['state']
-        last_state_update = user_state_data['last_state_update']
+        current_state = user_state_data.get('state')
+        last_state_update = user_state_data.get('last_state_update')
+        
+        if isinstance(last_state_update, str):
+            try:
+                last_state_update = datetime.fromisoformat(last_state_update.replace('Z', '+00:00'))
+            except ValueError:
+                last_state_update = datetime.now(timezone.utc)
+        elif last_state_update is None:
+            last_state_update = datetime.now(timezone.utc)
         
         # Get or create user
         user = User.get_or_create(user_id, instance_id)

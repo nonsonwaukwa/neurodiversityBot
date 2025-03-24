@@ -179,7 +179,15 @@ Please provide the analysis in JSON format with these fields:
             'Content-Type': 'application/json'
         }
         
-        prompt = f"""Analyze this weekly check-in response and determine the appropriate planning type:
+        try:
+            response = requests.post(
+                self.base_url,
+                headers=headers,
+                json={
+                    'model': 'deepseek-chat',
+                    'messages': [
+                        {'role': 'system', 'content': 'You are an expert in analyzing communication patterns of neurodivergent individuals, with special focus on determining appropriate planning approaches.'},
+                        {'role': 'user', 'content': f"""Analyze this weekly check-in response and determine the appropriate planning type:
 
 Text: {text}
 
@@ -196,7 +204,7 @@ For neurodivergent individuals, consider that:
 - Direct communication about struggles is valuable
 - Variable punctuation/capitalization may express emotion
 
-Please provide the analysis in JSON format with these fields:
+Return ONLY a JSON object with these exact fields (no markdown, no code blocks):
 {{
   "emotional_state": "overwhelmed/okay",
   "energy_level": "high/medium/low",
@@ -205,31 +213,25 @@ Please provide the analysis in JSON format with these fields:
   "needs_support": true/false,
   "planning_type": "daily/weekly",
   "confidence_score": 0.0-1.0
-}}"""
-
-        payload = {
-            'model': 'deepseek-chat',
-            'messages': [
-                {'role': 'system', 'content': 'You are an expert in analyzing communication patterns of neurodivergent individuals, with special focus on determining appropriate planning approaches.'},
-                {'role': 'user', 'content': prompt}
-            ],
-            'temperature': 0.3
-        }
-        
-        try:
-            response = requests.post(
-                self.base_url,
-                headers=headers,
-                json=payload
+}}"""}
+                    ],
+                    'temperature': 0.3
+                }
             )
             
             if response.status_code == 200:
                 result = response.json()
+                content = result['choices'][0]['message']['content']
+                
+                # Remove any markdown formatting or code blocks
+                content = content.replace('```json', '').replace('```', '').strip()
+                
                 try:
-                    analysis = json.loads(result['choices'][0]['message']['content'])
+                    analysis = json.loads(content)
                     return analysis
-                except:
-                    print(f"Failed to parse weekly check-in analysis: {result['choices'][0]['message']['content']}")
+                except json.JSONDecodeError as e:
+                    print(f"Failed to parse weekly check-in analysis: {content}")
+                    print(f"JSON decode error: {str(e)}")
                     return self._get_default_weekly_analysis()
             else:
                 print(f"API error ({response.status_code}): {response.text}")
