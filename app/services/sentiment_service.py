@@ -250,45 +250,33 @@ Please provide the analysis in JSON format with these fields:
             'confidence_score': 0.5
         }
 
-    def generate_weekly_response(self, analysis: Dict[str, Any], user_name: str) -> Dict[str, Any]:
-        """Generate appropriate response based on weekly check-in analysis."""
+    def generate_weekly_response(self, analysis: Dict[str, Any], user_name: str) -> Dict[str, str]:
+        """Generate a response for the weekly check-in based on sentiment analysis."""
         emotional_state = analysis.get('emotional_state', 'okay')
-        confidence = analysis.get('confidence_score', 0.5)
+        energy_level = analysis.get('energy_level', 'medium')
+        needs_support = analysis.get('needs_support', False)
+        emotions = analysis.get('emotions', [])
         
-        if confidence < 0.7:
-            # Low confidence - use fallback response
+        # Handle exhaustion and overwhelm
+        if 'exhausted' in emotions or energy_level == 'low' or emotional_state == 'overwhelmed':
+            response = f"I hear you, {user_name}. Mental exhaustion is really tough, and it's completely valid to feel this way. Let's break things down into smaller, more manageable pieces. For this week, we'll focus on daily check-ins to provide more support and flexibility. How does that sound?"
             return {
-                'message': (
-                    f"Thanks for sharing, {user_name}. I want to make sure I understand how you're feeling. "
-                    "Could you tell me a bit more about your current state? You can send a voice note or text - "
-                    "whatever feels easier. 💭"
-                ),
-                'planning_type': None  # Need more information
-            }
-        
-        if emotional_state == 'overwhelmed':
-            return {
-                'message': (
-                    f"I hear you're feeling overwhelmed right now, {user_name}. That's completely valid. "
-                    "Would you like to:\n"
-                    "1. Talk about what's feeling overwhelming? I'm here to listen and help break things down\n"
-                    "2. Take some time alone to rest and recharge? I'll check in tomorrow morning\n\n"
-                    "Remember, Sunday is a rest day, and it's okay to take time for yourself. 💙"
-                ),
+                'message': response,
                 'planning_type': 'daily'
             }
-        else:
+            
+        # Handle moderate stress/fatigue
+        elif 'tired' in emotions or energy_level == 'medium':
+            response = f"Thanks for sharing how you're feeling, {user_name}. It sounds like you could use some extra support right now. Would you like to try daily check-ins this week? We can adjust the pace and tasks based on your energy levels each day."
             return {
-                'message': (
-                    f"Thanks for sharing, {user_name}! Let's plan out your week. "
-                    "What are 2-3 things you'd like to work towards each day (Monday to Friday)?\n\n"
-                    "For example:\n"
-                    "Monday: Read for 15 minutes, Take a walk\n"
-                    "Tuesday: Organize workspace, Reply to emails\n"
-                    "Wednesday: Exercise, Meal prep\n"
-                    "Thursday: Journal, Study\n"
-                    "Friday: Clean room, Call friend\n\n"
-                    "Just list your tasks for each day, and we'll organize them together. 🌟"
-                ),
+                'message': response,
+                'planning_type': 'daily'
+            }
+            
+        # Handle okay/good state
+        else:
+            response = f"Thanks for checking in, {user_name}! It seems like you're in a good space to plan for the week ahead. Would you like to set up your weekly tasks now?"
+            return {
+                'message': response,
                 'planning_type': 'weekly'
             } 

@@ -230,13 +230,6 @@ def process_message(user_id: str, message_text: str, instance_id: str, services:
         
         # Handle weekly reflection (Sunday check-in)
         if current_state == 'WEEKLY_REFLECTION':
-            # Check if we're already waiting for clarification
-            if last_state_update:
-                time_diff = datetime.now(timezone.utc) - last_state_update
-                if time_diff.total_seconds() < 300:  # 5 minutes
-                    logger.info(f"Already waiting for clarification from user {user_id}, skipping duplicate response")
-                    return
-                
             # Analyze sentiment to understand emotional state
             analysis = services['sentiment'].analyze_weekly_checkin(message_text)
             logger.info(f"Weekly check-in analysis: {analysis}")
@@ -258,7 +251,6 @@ def process_message(user_id: str, message_text: str, instance_id: str, services:
                     services['task'].update_user_state(user_id, 'WEEKLY_TASK_SELECTION', instance_id)
             else:
                 # If no planning type determined, we're asking for clarification
-                # Update the state timestamp to prevent duplicate clarification messages
                 services['task'].update_user_state(user_id, 'WEEKLY_REFLECTION', instance_id)
             
             # Send response
