@@ -2,6 +2,7 @@ import os
 from typing import Dict, Any
 import requests
 import random
+import json
 
 class SentimentService:
     def __init__(self):
@@ -65,7 +66,6 @@ Please provide the analysis in JSON format with these fields:
                 result = response.json()
                 # Parse the JSON response from the model
                 try:
-                    import json
                     analysis = json.loads(result['choices'][0]['message']['content'])
                     return analysis
                 except:
@@ -170,4 +170,125 @@ Please provide the analysis in JSON format with these fields:
             'message': random.choice(rec['messages']),
             'structure_level': rec['structure_level'],
             'suggested_break_interval': rec['suggested_break_interval']
-        } 
+        }
+
+    def analyze_weekly_checkin(self, text: str) -> Dict[str, Any]:
+        """Analyze weekly check-in response and determine planning type."""
+        headers = {
+            'Authorization': f'Bearer {self.api_key}',
+            'Content-Type': 'application/json'
+        }
+        
+        prompt = f"""Analyze this weekly check-in response and determine the appropriate planning type:
+
+Text: {text}
+
+Please analyze for:
+1. Overall emotional state (overwhelmed/burnt out vs. okay/neutral/good)
+2. Energy level (high, medium, low)
+3. Stress level (high, medium, low)
+4. Key emotions
+5. Need for immediate support
+
+For neurodivergent individuals, consider that:
+- Brief responses might indicate overwhelm rather than disinterest
+- "Okay" might mean actually okay or might be masking difficulty
+- Direct communication about struggles is valuable
+- Variable punctuation/capitalization may express emotion
+
+Please provide the analysis in JSON format with these fields:
+{{
+  "emotional_state": "overwhelmed/okay",
+  "energy_level": "high/medium/low",
+  "stress_level": "high/medium/low",
+  "emotions": ["emotion1", "emotion2"],
+  "needs_support": true/false,
+  "planning_type": "daily/weekly",
+  "confidence_score": 0.0-1.0
+}}"""
+
+        payload = {
+            'model': 'deepseek-chat',
+            'messages': [
+                {'role': 'system', 'content': 'You are an expert in analyzing communication patterns of neurodivergent individuals, with special focus on determining appropriate planning approaches.'},
+                {'role': 'user', 'content': prompt}
+            ],
+            'temperature': 0.3
+        }
+        
+        try:
+            response = requests.post(
+                self.base_url,
+                headers=headers,
+                json=payload
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                try:
+                    analysis = json.loads(result['choices'][0]['message']['content'])
+                    return analysis
+                except:
+                    print(f"Failed to parse weekly check-in analysis: {result['choices'][0]['message']['content']}")
+                    return self._get_default_weekly_analysis()
+            else:
+                print(f"API error ({response.status_code}): {response.text}")
+                return self._get_default_weekly_analysis()
+        except Exception as e:
+            print(f"Exception in weekly check-in analysis: {str(e)}")
+            return self._get_default_weekly_analysis()
+
+    def _get_default_weekly_analysis(self) -> Dict[str, Any]:
+        """Return a default weekly check-in analysis."""
+        return {
+            'emotional_state': 'okay',
+            'energy_level': 'medium',
+            'stress_level': 'medium',
+            'emotions': ['neutral'],
+            'needs_support': False,
+            'planning_type': 'weekly',
+            'confidence_score': 0.5
+        }
+
+    def generate_weekly_response(self, analysis: Dict[str, Any], user_name: str) -> Dict[str, Any]:
+        """Generate appropriate response based on weekly check-in analysis."""
+        emotional_state = analysis.get('emotional_state', 'okay')
+        confidence = analysis.get('confidence_score', 0.5)
+        
+        if confidence < 0.7:
+            # Low confidence - use fallback response
+            return {
+                'message': (
+                    f"Thanks for sharing, {user_name}. I want to make sure I understand how you're feeling. "
+                    "Could you tell me a bit more about your current state? You can send a voice note or text - "
+                    "whatever feels easier. 💭"
+                ),
+                'planning_type': None  # Need more information
+            }
+        
+        if emotional_state == 'overwhelmed':
+            return {
+                'message': (
+                    f"I hear you're feeling overwhelmed right now, {user_name}. That's completely valid. "
+                    "Would you like to:\n"
+                    "1. Talk about what's feeling overwhelming? I'm here to listen and help break things down\n"
+                    "2. Take some time alone to rest and recharge? I'll check in tomorrow morning\n\n"
+                    "Remember, Sunday is a rest day, and it's okay to take time for yourself. 💙"
+                ),
+                'planning_type': 'daily'
+            }
+        else:
+            return {
+                'message': (
+                    f"Thanks for sharing, {user_name}! Let's plan out your week. "
+                    "What are 2-3 things you'd like to work towards each day (Monday to Friday)?\n\n"
+                    "For example:\n"
+                    "Monday: Read for 15 minutes, Take a walk\n"
+                    "Tuesday: Organize workspace, Reply to emails\n"
+                    "Wednesday: Exercise, Meal prep\n"
+                    "Thursday: Journal, Study\n"
+                    "Friday: Clean room, Call friend\n\n"
+                    "Just list your tasks for each day, and we'll organize them together. 🌟"
+                ),
+                'planning_type': 'weekly'
+            } 
