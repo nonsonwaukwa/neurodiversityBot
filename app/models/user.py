@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta, timezone
+import time
 from app.services.firebase import db
 
 class User:
@@ -8,10 +9,10 @@ class User:
         self.account_index = account_index
         self.planning_schedule = 'daily'  # 'daily' or 'weekly'
         self.weekly_tasks = []  # For users on weekly schedule
-        self.last_weekly_checkin = None
+        self.last_weekly_checkin = None  # Unix timestamp
         self.last_week_sentiment = None
         self.state = None
-        self.last_state_update = None
+        self.last_state_update = None  # Unix timestamp
 
     @staticmethod
     def get_all():
@@ -33,15 +34,7 @@ class User:
                 user.last_weekly_checkin = user_data.get('last_weekly_checkin')
                 user.last_week_sentiment = user_data.get('last_week_sentiment')
                 user.state = user_data.get('state')
-                # Convert timestamp string to datetime if it exists
-                last_state_update = user_data.get('last_state_update')
-                if isinstance(last_state_update, str):
-                    try:
-                        user.last_state_update = datetime.fromisoformat(last_state_update)
-                    except ValueError:
-                        user.last_state_update = None
-                else:
-                    user.last_state_update = last_state_update
+                user.last_state_update = user_data.get('last_state_update')
                 users.append(user)
         return users
 
@@ -85,7 +78,7 @@ class User:
         if new_state is not None:
             self.state = new_state
         if new_state is not None or force_timestamp_update:
-            self.last_state_update = datetime.now(timezone.utc)
+            self.last_state_update = int(time.time())
         self.save(f'instance{self.account_index}')
 
     def update_planning_schedule(self, schedule):
@@ -101,8 +94,6 @@ class User:
     def save(self, instance_id: str):
         """Save user data to Firebase."""
         user_ref = db.collection('instances').document(instance_id).collection('users').document(self.user_id)
-        # Convert datetime to ISO format string for Firebase storage
-        last_state_update = self.last_state_update.isoformat() if self.last_state_update else None
         user_data = {
             'name': self.name,
             'planning_schedule': self.planning_schedule,
@@ -110,13 +101,13 @@ class User:
             'last_weekly_checkin': self.last_weekly_checkin,
             'last_week_sentiment': self.last_week_sentiment,
             'state': self.state,
-            'last_state_update': last_state_update
+            'last_state_update': self.last_state_update
         }
         user_ref.set(user_data)
 
     def update_weekly_checkin(self, sentiment_data):
         """Update the user's weekly check-in data"""
-        self.last_weekly_checkin = datetime.now(timezone.utc).isoformat()
+        self.last_weekly_checkin = int(time.time())
         self.last_week_sentiment = sentiment_data
         self.save(f'instance{self.account_index}') 
  
