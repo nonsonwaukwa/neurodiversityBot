@@ -7,7 +7,7 @@ from firebase_admin import firestore
 import os
 import re
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import random
 import logging
 
@@ -219,9 +219,11 @@ def process_message(user_id: str, message_text: str, instance_id: str, services:
         # Handle weekly reflection (Sunday check-in)
         if user_state == 'WEEKLY_REFLECTION':
             # Check if we're already waiting for clarification
-            if user.last_state_update and (datetime.now() - user.last_state_update).seconds < 300:  # 5 minutes
-                logger.info(f"Already waiting for clarification from user {user_id}, skipping duplicate response")
-                return
+            if user.last_state_update:
+                time_diff = datetime.now(timezone.utc) - user.last_state_update
+                if time_diff.total_seconds() < 300:  # 5 minutes
+                    logger.info(f"Already waiting for clarification from user {user_id}, skipping duplicate response")
+                    return
                 
             # Analyze sentiment to understand emotional state
             analysis = services['sentiment'].analyze_weekly_checkin(message_text)
