@@ -1,5 +1,5 @@
 from firebase_admin import firestore
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List
 import json
 import time
@@ -21,27 +21,77 @@ class TaskService:
             print(f"Warning: Firestore unavailable - {str(e)}")
             print("Using in-memory storage as fallback (data will be lost on restart)")
         
-    def get_user_state(self, user_id: str, instance_id: str = 'default') -> str:
+    def get_user_state(self, user_id: str, instance_id: str = 'default') -> Dict[str, Any]:
         """Get the current state of the user in the system."""
         try:
             if self.use_firestore:
                 user_ref = self.db.collection('instances').document(instance_id).collection('users').document(user_id)
                 user_doc = user_ref.get()
                 
-                if not user_doc.exists:
-                    return 'SETUP'
+                if user_doc.exists:
+                    user_data = user_doc.to_dict()
+                    state = user_data.get('state', 'INITIAL')
+                    last_state_update = user_data.get('last_state_update')
                     
-                user_data = user_doc.to_dict()
-                return user_data.get('state', 'SETUP')
+                    # Convert timestamp string to datetime if it exists
+                    if isinstance(last_state_update, str):
+                        try:
+                            last_state_update = datetime.fromisoformat(last_state_update)
+                        except ValueError:
+                            last_state_update = datetime.now(timezone.utc)
+                    elif last_state_update is None:
+                        last_state_update = datetime.now(timezone.utc)
+                        
+                    return {
+                        'state': state,
+                        'last_state_update': last_state_update
+                    }
+                else:
+                    # Initialize new user state
+                    now = datetime.now(timezone.utc)
+                    self.update_user_state(user_id, 'INITIAL', instance_id)
+                    return {
+                        'state': 'INITIAL',
+                        'last_state_update': now
+                    }
             else:
-                # Fallback to in-memory storage
-                instance_key = f"{instance_id}:{user_id}"
-                if instance_key not in memory_storage['users']:
-                    return 'SETUP'
-                return memory_storage['users'][instance_key].get('state', 'SETUP')
+                # Fallback to memory storage
+                user_key = f"{instance_id}_{user_id}"
+                if user_key not in memory_storage['users']:
+                    memory_storage['users'][user_key] = {
+                        'state': 'INITIAL',
+                        'last_state_update': datetime.now(timezone.utc)
+                    }
+                return memory_storage['users'][user_key]
+                
         except Exception as e:
             print(f"Error getting user state: {str(e)}")
-            return 'SETUP'
+            return {
+                'state': 'INITIAL',
+                'last_state_update': datetime.now(timezone.utc)
+            }
+
+    def update_user_state(self, user_id: str, new_state: str, instance_id: str = 'default'):
+        """Update the user's state in the system."""
+        try:
+            now = datetime.now(timezone.utc)
+            if self.use_firestore:
+                user_ref = self.db.collection('instances').document(instance_id).collection('users').document(user_id)
+                user_ref.set({
+                    'state': new_state,
+                    'last_state_update': now.isoformat()
+                }, merge=True)
+            else:
+                # Fallback to memory storage
+                user_key = f"{instance_id}_{user_id}"
+                if user_key not in memory_storage['users']:
+                    memory_storage['users'][user_key] = {}
+                memory_storage['users'][user_key].update({
+                    'state': new_state,
+                    'last_state_update': now
+                })
+        except Exception as e:
+            print(f"Error updating user state: {str(e)}")
         
     def create_user(self, user_id: str, instance_id: str = 'default', phone_number: str = None) -> None:
         """Create a new user in the system."""
@@ -78,37 +128,6 @@ class TaskService:
             # Fallback to in-memory storage
             instance_key = f"{instance_id}:{user_id}"
             memory_storage['users'][instance_key] = user_data
-        
-    def update_user_state(self, user_id: str, state: str, instance_id: str = 'default') -> None:
-        """Update the user's current state."""
-        update_data = {
-            'state': state,
-            'last_interaction': datetime.now()
-        }
-        
-        try:
-            if self.use_firestore:
-                # Update instance-specific collection
-                instance_user_ref = self.db.collection('instances').document(instance_id).collection('users').document(user_id)
-                instance_user_ref.update(update_data)
-                
-                # Update unified collection
-                unified_user_ref = self.db.collection('users').document(user_id)
-                unified_user_ref.update(update_data)
-            else:
-                # Fallback to in-memory storage
-                instance_key = f"{instance_id}:{user_id}"
-                if instance_key in memory_storage['users']:
-                    memory_storage['users'][instance_key]['state'] = state
-                    memory_storage['users'][instance_key]['last_interaction'] = datetime.now()
-        except Exception as e:
-            print(f"Error updating user state: {str(e)}")
-            # Fallback to in-memory storage
-            instance_key = f"{instance_id}:{user_id}"
-            if instance_key not in memory_storage['users']:
-                self.create_user(user_id, instance_id, None)
-            memory_storage['users'][instance_key]['state'] = state
-            memory_storage['users'][instance_key]['last_interaction'] = datetime.now()
         
     def save_tasks(self, user_id: str, tasks: List[str], instance_id: str = 'default') -> None:
         """Save the user's tasks for the day."""

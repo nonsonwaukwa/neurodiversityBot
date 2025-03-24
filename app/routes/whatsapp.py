@@ -218,7 +218,9 @@ def process_message(user_id: str, message_text: str, instance_id: str, services:
     
     try:
         # Get user's current state
-        user_state = services['task'].get_user_state(user_id, instance_id)
+        user_state_data = services['task'].get_user_state(user_id, instance_id)
+        current_state = user_state_data['state']
+        last_state_update = user_state_data['last_state_update']
         
         # Get or create user
         user = User.get_or_create(user_id, instance_id)
@@ -227,10 +229,10 @@ def process_message(user_id: str, message_text: str, instance_id: str, services:
             return
         
         # Handle weekly reflection (Sunday check-in)
-        if user_state == 'WEEKLY_REFLECTION':
+        if current_state == 'WEEKLY_REFLECTION':
             # Check if we're already waiting for clarification
-            if user.last_state_update:
-                time_diff = datetime.now(timezone.utc) - user.last_state_update
+            if last_state_update:
+                time_diff = datetime.now(timezone.utc) - last_state_update
                 if time_diff.total_seconds() < 300:  # 5 minutes
                     logger.info(f"Already waiting for clarification from user {user_id}, skipping duplicate response")
                     return
@@ -257,7 +259,7 @@ def process_message(user_id: str, message_text: str, instance_id: str, services:
             else:
                 # If no planning type determined, we're asking for clarification
                 # Update the state timestamp to prevent duplicate clarification messages
-                user.update_user_state('WEEKLY_REFLECTION', force_timestamp_update=True)
+                services['task'].update_user_state(user_id, 'WEEKLY_REFLECTION', instance_id)
             
             # Send response
             services['whatsapp'].send_message(user_id, response_message)
