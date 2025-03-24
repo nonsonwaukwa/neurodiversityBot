@@ -11,6 +11,7 @@ class User:
         self.last_weekly_checkin = None
         self.last_week_sentiment = None
         self.state = None
+        self.last_state_update = None
 
     @staticmethod
     def get_all():
@@ -32,6 +33,7 @@ class User:
                 user.last_weekly_checkin = user_data.get('last_weekly_checkin')
                 user.last_week_sentiment = user_data.get('last_week_sentiment')
                 user.state = user_data.get('state')
+                user.last_state_update = user_data.get('last_state_update')
                 users.append(user)
         return users
 
@@ -54,6 +56,7 @@ class User:
             user.last_weekly_checkin = user_data.get('last_weekly_checkin')
             user.last_week_sentiment = user_data.get('last_week_sentiment')
             user.state = user_data.get('state')
+            user.last_state_update = user_data.get('last_state_update')
             return user
         else:
             # Create new user
@@ -62,50 +65,48 @@ class User:
                 name=user_id,  # Use user_id as name initially
                 account_index=account_index
             )
-            user.save()
+            user.save(instance_id)
             return user
 
     def get_last_week_sentiment(self):
         """Get the user's sentiment data from last week"""
         return self.last_week_sentiment
 
-    def update_user_state(self, new_state):
-        """Update the user's state in the database"""
-        instance_id = f'instance{self.account_index}'
-        user_ref = db.collection('instances').document(instance_id).collection('users').document(self.user_id)
-        user_ref.update({
-            'state': new_state,
-            'last_state_update': datetime.now()
-        })
-        self.state = new_state
+    def update_user_state(self, new_state: str = None, force_timestamp_update: bool = False):
+        """Update the user's state and last_state_update timestamp."""
+        if new_state is not None:
+            self.state = new_state
+        if new_state is not None or force_timestamp_update:
+            self.last_state_update = datetime.now()
+        self.save(f'instance{self.account_index}')
 
     def update_planning_schedule(self, schedule):
         """Update the user's planning schedule"""
         self.planning_schedule = schedule
-        self.save()
+        self.save(f'instance{self.account_index}')
 
     def set_weekly_tasks(self, tasks):
         """Set weekly tasks for users on weekly schedule"""
         self.weekly_tasks = tasks
-        self.save()
+        self.save(f'instance{self.account_index}')
 
-    def save(self):
-        """Save user data to the database"""
-        instance_id = f'instance{self.account_index}'
+    def save(self, instance_id: str):
+        """Save user data to Firebase."""
         user_ref = db.collection('instances').document(instance_id).collection('users').document(self.user_id)
-        user_ref.set({
+        user_data = {
             'name': self.name,
             'planning_schedule': self.planning_schedule,
             'weekly_tasks': self.weekly_tasks,
             'last_weekly_checkin': self.last_weekly_checkin,
             'last_week_sentiment': self.last_week_sentiment,
             'state': self.state,
-            'updated_at': datetime.now().isoformat()
-        }, merge=True)
+            'last_state_update': self.last_state_update
+        }
+        user_ref.set(user_data)
 
     def update_weekly_checkin(self, sentiment_data):
         """Update the user's weekly check-in data"""
         self.last_weekly_checkin = datetime.now().isoformat()
         self.last_week_sentiment = sentiment_data
-        self.save() 
+        self.save(f'instance{self.account_index}') 
  
