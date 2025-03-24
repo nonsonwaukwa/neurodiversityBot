@@ -77,17 +77,18 @@ def is_message_processed(message_id: str, instance_id: str) -> bool:
         doc = doc_ref.get()
         
         if doc.exists:
-            # Check if message is too old (more than 24 hours)
-            message_data = doc.to_dict()
-            message_time = message_data.get('timestamp', 0)
-            if time.time() - message_time > 86400:  # 24 hours
-                logger.info(f"Message {message_id} is too old, skipping")
-                return True
             return True
         return False
     except Exception as e:
         logger.error(f"Error checking message status: {str(e)}")
         return False
+
+def is_message_recent(timestamp: int) -> bool:
+    """Check if a message is recent (within the last 6 hours)."""
+    current_time = int(time.time())
+    message_age = current_time - timestamp
+    # Only process messages less than 6 hours old
+    return message_age < 21600  # 6 hours in seconds
 
 def mark_message_processed(message_id: str, instance_id: str, timestamp: int):
     """Mark a message as processed in Firebase."""
@@ -148,6 +149,11 @@ def webhook():
                             message_id = message.get('id')
                             timestamp = int(message.get('timestamp', time.time()))
                             
+                            # Skip old messages
+                            if not is_message_recent(timestamp):
+                                logger.info(f"Skipping old message {message_id} from timestamp {timestamp}")
+                                continue
+                            
                             # Check for message deduplication using Firebase
                             phone_number_id = value.get('metadata', {}).get('phone_number_id')
                             instance_id = get_instance_from_phone_number(phone_number_id)
@@ -168,7 +174,11 @@ def webhook():
                                 raise
                                 
                 elif 'statuses' in value:
-                    logger.info(f"Received status update: {value['statuses']}")
+                    # Only log recent status updates
+                    for status in value['statuses']:
+                        status_timestamp = int(status.get('timestamp', time.time()))
+                        if is_message_recent(status_timestamp):
+                            logger.info(f"Received status update: {status}")
         
         return jsonify({'status': 'ok'})
         
