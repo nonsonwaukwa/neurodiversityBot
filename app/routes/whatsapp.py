@@ -334,29 +334,74 @@ def handle_task_command(user_id: str, command_match: re.Match, instance_id: str,
 
 def handle_weekly_reflection(user_id: str, message_text: str, instance_id: str, services: dict, context: dict):
     """Handle weekly reflection flow."""
-    # Analyze sentiment and determine planning type
-    analysis = services['sentiment'].analyze_weekly_checkin(message_text)
-    logger.info(f"Weekly check-in analysis: {analysis}")
-    
-    # Update context with analysis results
-    context_updates = {
-        'emotional_state': analysis.get('emotional_state'),
-        'energy_level': analysis.get('energy_level'),
-        'planning_type': analysis.get('planning_type')
-    }
-    
-    # Generate response
-    response_data = services['sentiment'].generate_weekly_response(analysis, user.name)
-    services['whatsapp'].send_message(user_id, response_data['message'])
-    
-    # Update state based on planning type
-    if response_data['planning_type'] == 'daily':
-        services['task'].update_user_state(
-            user_id, 'DAILY_CHECK_IN', instance_id, context_updates
-        )
-    else:
-        services['task'].update_user_state(
-            user_id, 'WEEKLY_TASK_SELECTION', instance_id, context_updates
+    try:
+        # Get user
+        user = User.get_or_create(user_id, instance_id)
+        if not user:
+            logger.error(f"Failed to get/create user {user_id}")
+            return
+            
+        # Analyze sentiment and determine planning type
+        analysis = services['sentiment'].analyze_weekly_checkin(message_text)
+        logger.info(f"Weekly check-in analysis: {analysis}")
+        
+        # Update context with analysis results
+        context_updates = {
+            'emotional_state': analysis.get('emotional_state'),
+            'energy_level': analysis.get('energy_level'),
+            'planning_type': analysis.get('planning_type'),
+            'last_weekly_checkin': int(time.time())
+        }
+        
+        # Generate response based on sentiment
+        name = user.name.split('_')[0] if '_' in user.name else user.name
+        
+        # Build response based on emotional state
+        if analysis.get('emotional_state') == 'positive':
+            response = (
+                f"That's great to hear, {name}! 🌟 I'm glad you're feeling good. "
+                "Let's channel this energy into planning for the week ahead.\n\n"
+                "Would you like to:\n"
+                "1. Set some exciting goals for the week?\n"
+                "2. Break down your tasks into manageable steps?\n"
+                "3. Focus on maintaining this positive momentum?"
+            )
+        elif analysis.get('emotional_state') == 'negative':
+            response = (
+                f"I hear you, {name}. 💙 It's completely okay to not be feeling your best. "
+                "Let's approach this week gently.\n\n"
+                "Would you prefer to:\n"
+                "1. Set very small, manageable goals?\n"
+                "2. Focus on self-care and essential tasks only?\n"
+                "3. Talk more about what's on your mind?"
+            )
+        else:
+            response = (
+                f"Thanks for sharing, {name}. 💭 Let's find the right approach for your energy level.\n\n"
+                "What would feel most helpful right now:\n"
+                "1. Planning out the week step by step?\n"
+                "2. Setting a few key priorities?\n"
+                "3. Starting with today and seeing how it goes?"
+            )
+        
+        # Send response
+        services['whatsapp'].send_message(user_id, response)
+        
+        # Update state based on planning type
+        if analysis.get('planning_type') == 'daily':
+            services['task'].update_user_state(
+                user_id, 'DAILY_CHECK_IN', instance_id, context_updates
+            )
+        else:
+            services['task'].update_user_state(
+                user_id, 'WEEKLY_TASK_SELECTION', instance_id, context_updates
+            )
+            
+    except Exception as e:
+        logger.error(f"Error handling weekly reflection for user {user_id}: {e}")
+        services['whatsapp'].send_message(
+            user_id,
+            "I'm having trouble processing your response right now. Could you try sharing your thoughts again?"
         )
 
 def handle_daily_checkin(user_id: str, message_text: str, instance_id: str, services: dict, context: dict):
