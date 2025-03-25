@@ -391,8 +391,10 @@ def handle_weekly_reflection(user_id: str, message_text: str, instance_id: str, 
         context_updates = {
             'emotional_state': analysis.get('emotional_state'),
             'energy_level': analysis.get('energy_level'),
-            'planning_type': analysis.get('planning_type'),
+            'planning_type': analysis.get('planning_type', 'weekly'),  # Default to weekly if not specified
             'support_needed': analysis.get('support_needed'),
+            'key_emotions': analysis.get('key_emotions', []),
+            'recommended_approach': analysis.get('recommended_approach'),
             'last_weekly_checkin': int(time.time())
         }
         logger.info(f"Context updates: {context_updates}")
@@ -401,17 +403,31 @@ def handle_weekly_reflection(user_id: str, message_text: str, instance_id: str, 
         name = user.name.split('_')[0] if '_' in user.name else user.name
         logger.info(f"Generating response for user {name}")
         
-        # Build response based on emotional state
-        if analysis.get('emotional_state') == 'positive':
-            response = (
-                f"That's great to hear, {name}! 🌟 I'm glad you're feeling good. "
-                "Let's channel this energy into planning for the week ahead.\n\n"
-                "Would you like to:\n"
-                "1. Set some exciting goals for the week?\n"
-                "2. Break down your tasks into manageable steps?\n"
-                "3. Focus on maintaining this positive momentum?"
-            )
-        elif analysis.get('emotional_state') == 'negative':
+        # Build response based on emotional state and energy level
+        emotional_state = analysis.get('emotional_state', 'neutral')
+        energy_level = analysis.get('energy_level', 'medium')
+        logger.info(f"Building response for emotional_state: {emotional_state}, energy_level: {energy_level}")
+        
+        if emotional_state == 'positive':
+            if energy_level == 'high':
+                response = (
+                    f"That's fantastic, {name}! 🌟 I love your positive energy. "
+                    "Let's make the most of this momentum for the week ahead.\n\n"
+                    "Would you like to:\n"
+                    "1. Set some ambitious goals for the week?\n"
+                    "2. Create an energizing daily routine?\n"
+                    "3. Plan some exciting projects to tackle?"
+                )
+            else:
+                response = (
+                    f"I'm glad you're feeling good, {name}! 🌟 "
+                    "Let's channel this positive feeling into a balanced plan.\n\n"
+                    "Would you like to:\n"
+                    "1. Set some enjoyable goals for the week?\n"
+                    "2. Break down your tasks into manageable steps?\n"
+                    "3. Focus on maintaining this positive momentum?"
+                )
+        elif emotional_state == 'negative':
             response = (
                 f"I hear you, {name}. 💙 It's completely okay to not be feeling your best. "
                 "Let's approach this week gently.\n\n"
@@ -435,7 +451,12 @@ def handle_weekly_reflection(user_id: str, message_text: str, instance_id: str, 
         services['whatsapp'].send_message(user_id, response)
         
         # Update state based on planning type
-        new_state = 'DAILY_CHECK_IN' if analysis.get('planning_type') == 'daily' else 'WEEKLY_TASK_SELECTION'
+        # For positive responses with high energy, prefer weekly planning
+        if emotional_state == 'positive' and energy_level == 'high':
+            new_state = 'WEEKLY_TASK_SELECTION'
+        else:
+            new_state = 'DAILY_CHECK_IN' if analysis.get('planning_type') == 'daily' else 'WEEKLY_TASK_SELECTION'
+            
         logger.info(f"Updating user state to: {new_state}")
         
         services['task'].update_user_state(

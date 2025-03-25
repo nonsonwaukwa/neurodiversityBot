@@ -232,12 +232,30 @@ Return the analysis in this exact JSON format:
                 logger.info(f"Raw API response: {result}")
                 
                 try:
-                    analysis = json.loads(result['choices'][0]['message']['content'])
+                    # Extract content from the response
+                    content = result['choices'][0]['message']['content']
+                    logger.info(f"Raw content: {content}")
+                    
+                    # Remove markdown code blocks and clean up the content
+                    content = content.replace('```json', '').replace('```', '').strip()
+                    # Remove any extra newlines that might interfere with parsing
+                    content = ''.join(line.strip() for line in content.splitlines())
+                    logger.info(f"Cleaned content: {content}")
+                    
+                    analysis = json.loads(content)
                     logger.info(f"Parsed sentiment analysis: {analysis}")
-                    return analysis
+                    
+                    # Validate the response has the expected fields
+                    required_fields = ['emotional_state', 'energy_level', 'planning_type', 'support_needed', 'key_emotions', 'recommended_approach']
+                    if all(field in analysis for field in required_fields):
+                        return analysis
+                    else:
+                        logger.error("Missing required fields in API response")
+                        return self._get_default_sentiment()
+                        
                 except json.JSONDecodeError as e:
                     logger.error(f"Failed to parse API response: {e}")
-                    logger.error(f"Raw content: {result['choices'][0]['message']['content']}")
+                    logger.error(f"Raw content: {content}")
                     return self._get_default_sentiment()
             else:
                 logger.error(f"API error ({response.status_code}): {response.text}")
