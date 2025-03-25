@@ -3,6 +3,7 @@ from app.services.whatsapp_service import WhatsAppService
 from app.services.sentiment_service import SentimentService
 from app.services.task_service import TaskService
 from app.models.user import User
+from app.utils.validation import parse_task_input, validate_task_input
 from firebase_admin import firestore
 import os
 import re
