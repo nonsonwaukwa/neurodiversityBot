@@ -3,6 +3,10 @@ import requests
 from typing import Dict, Any
 import json
 import random
+import logging
+
+# Set up logging
+logger = logging.getLogger(__name__)
 
 class WhatsAppService:
     def __init__(self, instance_id: str = 'instance1'):
@@ -23,12 +27,18 @@ class WhatsAppService:
         )
         
         if not self.phone_number_id or not self.access_token:
-            print(f"Warning: Missing WhatsApp credentials for instance {instance_id}")
-            print("Available environment variables:", [k for k in os.environ.keys() if 'WHATSAPP' in k])
+            logger.warning(f"Missing WhatsApp credentials for instance {instance_id}")
+            logger.warning("Available environment variables: %s", [k for k in os.environ.keys() if 'WHATSAPP' in k])
             self.is_configured = False
         else:
             self.is_configured = True
             self.base_url = f'https://graph.facebook.com/{self.api_version}/{self.phone_number_id}'
+            
+        # Set up headers
+        self.headers = {
+            'Authorization': f'Bearer {self.access_token}',
+            'Content-Type': 'application/json'
+        }
 
     def send_message(self, to: str, message: str) -> Dict[str, Any]:
         """Send a message to a WhatsApp user."""

@@ -380,7 +380,15 @@ def handle_weekly_reflection(user_id: str, message_text: str, instance_id: str, 
         user = User.get_or_create(user_id, instance_id)
         if not user:
             logger.error(f"Failed to get/create user {user_id}")
+            services['whatsapp'].send_message(
+                user_id,
+                "I'm having trouble accessing your information. Could you try again in a moment?"
+            )
             return
+            
+        # Get user's name
+        name = user.name.split('_')[0] if user.name and '_' in user.name else (user.name or "Friend")
+        logger.info(f"Processing for user: {name}")
             
         # Check if this is a response to planning selection
         if message_text.upper() in ['PLAN FOR THE WEEK', 'DAY BY DAY PLANNING']:
@@ -404,7 +412,6 @@ def handle_weekly_reflection(user_id: str, message_text: str, instance_id: str, 
         logger.info(f"Context updates: {context_updates}")
         
         # Generate response based on sentiment
-        name = user.name.split('_')[0] if '_' in user.name else user.name
         logger.info(f"Generating response for user {name}")
         
         emotional_state = analysis.get('emotional_state', 'neutral')
@@ -420,6 +427,7 @@ def handle_weekly_reflection(user_id: str, message_text: str, instance_id: str, 
             )
             new_state = 'DAILY_CHECK_IN'
             context_updates['planning_type'] = 'daily'
+            services['whatsapp'].send_message(user_id, response)
             
         else:  # positive or neutral
             response = (
@@ -428,22 +436,28 @@ def handle_weekly_reflection(user_id: str, message_text: str, instance_id: str, 
                 "How would you like to plan?"
             )
             # Send interactive buttons for planning selection
-            services['whatsapp'].send_interactive_buttons(
-                user_id,
-                response,
-                [
-                    {"id": "weekly", "title": "Plan for the week"},
-                    {"id": "daily", "title": "Day by day planning"}
-                ]
-            )
-            new_state = 'AWAITING_PLANNING_CHOICE'
-            context_updates['planning_type'] = 'pending_selection'
-            
-        logger.info(f"Sending response to user: {response}")
-        
-        # Only send regular message for negative sentiment
-        if emotional_state == 'negative':
-            services['whatsapp'].send_message(user_id, response)
+            try:
+                services['whatsapp'].send_interactive_buttons(
+                    user_id,
+                    response,
+                    [
+                        {"id": "weekly", "title": "Plan for the week"},
+                        {"id": "daily", "title": "Day by day planning"}
+                    ]
+                )
+                new_state = 'AWAITING_PLANNING_CHOICE'
+                context_updates['planning_type'] = 'pending_selection'
+            except Exception as e:
+                logger.error(f"Failed to send interactive buttons: {e}")
+                # Fallback to regular message with options
+                fallback_response = (
+                    f"{response}\n\n"
+                    "1. Plan for the week\n"
+                    "2. Day by day planning"
+                )
+                services['whatsapp'].send_message(user_id, fallback_response)
+                new_state = 'AWAITING_PLANNING_CHOICE'
+                context_updates['planning_type'] = 'pending_selection'
         
         # Update user state
         logger.info(f"Updating user state to: {new_state}")
