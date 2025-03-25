@@ -278,6 +278,61 @@ class WhatsAppService:
         
         return self.send_message(to, message)
 
+    def send_interactive_buttons(self, user_id: str, message: str, buttons: list):
+        """Send a message with interactive buttons.
+        
+        Args:
+            user_id (str): The recipient's WhatsApp ID
+            message (str): The message text to send
+            buttons (list): List of button objects with 'id' and 'title'
+        """
+        try:
+            # Format buttons for WhatsApp API
+            button_list = []
+            for button in buttons:
+                button_list.append({
+                    "type": "reply",
+                    "reply": {
+                        "id": button["id"],
+                        "title": button["title"]
+                    }
+                })
+            
+            payload = {
+                "messaging_product": "whatsapp",
+                "recipient_type": "individual",
+                "to": user_id,
+                "type": "interactive",
+                "interactive": {
+                    "type": "button",
+                    "body": {
+                        "text": message
+                    },
+                    "action": {
+                        "buttons": button_list
+                    }
+                }
+            }
+            
+            response = requests.post(
+                f"{self.base_url}/messages",
+                headers=self.headers,
+                json=payload
+            )
+            
+            if response.status_code != 200:
+                logger.error(f"Failed to send interactive message: {response.text}")
+                # Fallback to regular message with numbered options
+                fallback_message = message + "\n\n"
+                for i, button in enumerate(buttons, 1):
+                    fallback_message += f"{i}. {button['title']}\n"
+                self.send_message(user_id, fallback_message)
+            
+        except Exception as e:
+            logger.error(f"Error sending interactive buttons: {str(e)}")
+            # Fallback to regular message
+            self.send_message(user_id, message)
+
 def get_whatsapp_service(instance_id: str = 'instance1') -> WhatsAppService:
     """Get a WhatsApp service instance for the given instance ID."""
     return WhatsAppService(instance_id) 

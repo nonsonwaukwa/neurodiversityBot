@@ -382,6 +382,11 @@ def handle_weekly_reflection(user_id: str, message_text: str, instance_id: str, 
             logger.error(f"Failed to get/create user {user_id}")
             return
             
+        # Check if this is a response to planning selection
+        if message_text.upper() in ['PLAN FOR THE WEEK', 'DAY BY DAY PLANNING']:
+            handle_planning_selection(user_id, message_text.upper(), instance_id, services, context)
+            return
+            
         # Analyze sentiment and determine planning type
         logger.info("Calling sentiment analysis service")
         analysis = services['sentiment'].analyze_weekly_checkin(message_text)
@@ -391,7 +396,6 @@ def handle_weekly_reflection(user_id: str, message_text: str, instance_id: str, 
         context_updates = {
             'emotional_state': analysis.get('emotional_state'),
             'energy_level': analysis.get('energy_level'),
-            'planning_type': analysis.get('planning_type', 'weekly'),  # Default to weekly if not specified
             'support_needed': analysis.get('support_needed'),
             'key_emotions': analysis.get('key_emotions', []),
             'recommended_approach': analysis.get('recommended_approach'),
@@ -403,62 +407,46 @@ def handle_weekly_reflection(user_id: str, message_text: str, instance_id: str, 
         name = user.name.split('_')[0] if '_' in user.name else user.name
         logger.info(f"Generating response for user {name}")
         
-        # Build response based on emotional state and energy level
         emotional_state = analysis.get('emotional_state', 'neutral')
         energy_level = analysis.get('energy_level', 'medium')
         logger.info(f"Building response for emotional_state: {emotional_state}, energy_level: {energy_level}")
         
-        if emotional_state == 'positive':
-            if energy_level == 'high':
-                response = (
-                    f"That's fantastic, {name}! 🌟 I love your positive energy. "
-                    "Let's make the most of this momentum for the week ahead.\n\n"
-                    "Would you like to:\n"
-                    "1. Set some ambitious goals for the week?\n"
-                    "2. Create an energizing daily routine?\n"
-                    "3. Plan some exciting projects to tackle?"
-                )
-            else:
-                response = (
-                    f"I'm glad you're feeling good, {name}! 🌟 "
-                    "Let's channel this positive feeling into a balanced plan.\n\n"
-                    "Would you like to:\n"
-                    "1. Set some enjoyable goals for the week?\n"
-                    "2. Break down your tasks into manageable steps?\n"
-                    "3. Focus on maintaining this positive momentum?"
-                )
-        elif emotional_state == 'negative':
+        if emotional_state == 'negative':
             response = (
                 f"I hear you, {name}. 💙 It's completely okay to not be feeling your best. "
-                "Let's approach this week gently.\n\n"
-                "Would you prefer to:\n"
-                "1. Set very small, manageable goals?\n"
-                "2. Focus on self-care and essential tasks only?\n"
-                "3. Talk more about what's on your mind?"
+                "Let's take it day by day and focus on what feels manageable.\n\n"
+                "I'll check in with you tomorrow morning to help plan your day. "
+                "For now, is there anything specific you'd like to talk about?"
             )
-        else:
+            new_state = 'DAILY_CHECK_IN'
+            context_updates['planning_type'] = 'daily'
+            
+        else:  # positive or neutral
             response = (
-                f"Thanks for sharing, {name}. 💭 Let's find the right approach for your energy level.\n\n"
-                "What would feel most helpful right now:\n"
-                "1. Planning out the week step by step?\n"
-                "2. Setting a few key priorities?\n"
-                "3. Starting with today and seeing how it goes?"
+                f"That's fantastic, {name}! 🌟 I love your positive energy. "
+                "Let's make the most out of this week ahead!\n\n"
+                "How would you like to plan?"
             )
-        
+            # Send interactive buttons for planning selection
+            services['whatsapp'].send_interactive_buttons(
+                user_id,
+                response,
+                [
+                    {"id": "weekly", "title": "Plan for the week"},
+                    {"id": "daily", "title": "Day by day planning"}
+                ]
+            )
+            new_state = 'AWAITING_PLANNING_CHOICE'
+            context_updates['planning_type'] = 'pending_selection'
+            
         logger.info(f"Sending response to user: {response}")
         
-        # Send response
-        services['whatsapp'].send_message(user_id, response)
+        # Only send regular message for negative sentiment
+        if emotional_state == 'negative':
+            services['whatsapp'].send_message(user_id, response)
         
-        # Update state based on planning type
-        # For positive responses with high energy, prefer weekly planning
-        if emotional_state == 'positive' and energy_level == 'high':
-            new_state = 'WEEKLY_TASK_SELECTION'
-        else:
-            new_state = 'DAILY_CHECK_IN' if analysis.get('planning_type') == 'daily' else 'WEEKLY_TASK_SELECTION'
-            
+        # Update user state
         logger.info(f"Updating user state to: {new_state}")
-        
         services['task'].update_user_state(
             user_id, new_state, instance_id, context_updates
         )
@@ -469,6 +457,59 @@ def handle_weekly_reflection(user_id: str, message_text: str, instance_id: str, 
         services['whatsapp'].send_message(
             user_id,
             "I'm having trouble processing your response right now. Could you try sharing your thoughts again?"
+        )
+
+def handle_planning_selection(user_id: str, selection: str, instance_id: str, services: dict, context: dict):
+    """Handle user's planning type selection."""
+    try:
+        user = User.get_or_create(user_id, instance_id)
+        if not user:
+            logger.error(f"Failed to get/create user {user_id}")
+            return
+            
+        name = user.name.split('_')[0] if '_' in user.name else user.name
+        
+        if selection == 'PLAN FOR THE WEEK':
+            response = (
+                f"Excellent choice, {name}! Let's plan your week. 📝\n\n"
+                "Please share your main tasks or goals for the week ahead. "
+                "You can list them like this:\n\n"
+                "1. [Your first task]\n"
+                "2. [Your second task]\n"
+                "And so on..."
+            )
+            new_state = 'WEEKLY_TASK_SELECTION'
+            planning_type = 'weekly'
+        else:  # DAY BY DAY PLANNING
+            response = (
+                f"Perfect, {name}! We'll take it day by day. 🌅\n\n"
+                "Have a wonderful rest of your weekend! "
+                "I'll check in with you tomorrow morning to help plan your day."
+            )
+            new_state = 'DAILY_CHECK_IN'
+            planning_type = 'daily'
+            
+        services['whatsapp'].send_message(user_id, response)
+        
+        # Update user state and planning type
+        context_updates = {
+            'planning_type': planning_type,
+            'last_planning_selection': int(time.time())
+        }
+        
+        services['task'].update_user_state(
+            user_id, new_state, instance_id, context_updates
+        )
+        
+    except Exception as e:
+        logger.error(f"Error handling planning selection for user {user_id}: {e}")
+        # Default to daily planning on error
+        services['whatsapp'].send_message(
+            user_id,
+            "I had trouble processing your selection. Let's go with day by day planning to keep things simple."
+        )
+        services['task'].update_user_state(
+            user_id, 'DAILY_CHECK_IN', instance_id, {'planning_type': 'daily'}
         )
 
 def handle_daily_checkin(user_id: str, message_text: str, instance_id: str, services: dict, context: dict):
