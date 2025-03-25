@@ -249,7 +249,25 @@ def process_message(user_id: str, message_text: str, instance_id: str, services:
             services['whatsapp'].send_message(user_id, response)
             return
 
-        # If there are pending check-ins, determine which one to handle
+        # Handle based on current state first
+        if current_state == 'WEEKLY_REFLECTION':
+            logger.info("Processing weekly reflection based on state")
+            handle_weekly_reflection(user_id, message_text, instance_id, services, context)
+            return
+        elif current_state == 'DAILY_CHECK_IN':
+            logger.info("Processing daily check-in based on state")
+            handle_daily_checkin(user_id, message_text, instance_id, services, context)
+            return
+        elif current_state == 'MIDDAY_CHECK_IN':
+            logger.info("Processing midday check-in based on state")
+            handle_midday_checkin(user_id, message_text, instance_id, services, context)
+            return
+        elif current_state == 'END_DAY_CHECK_IN':
+            logger.info("Processing end-day check-in based on state")
+            handle_end_day_checkin(user_id, message_text, instance_id, services, context)
+            return
+
+        # If no active state, check pending check-ins
         if pending_checkins:
             # Sort check-ins by time added
             sorted_checkins = sorted(pending_checkins, key=lambda x: x['added_at'])
@@ -274,25 +292,25 @@ def process_message(user_id: str, message_text: str, instance_id: str, services:
 
             # Handle the check-in based on type
             if checkin_type == services['task'].CHECK_IN_TYPES['WEEKLY']:
-                logger.info("Handling weekly reflection")
+                logger.info("Handling weekly reflection from pending check-in")
                 handle_weekly_reflection(user_id, message_text, instance_id, services, context)
                 services['task'].resolve_checkin(user_id, checkin_type, instance_id)
                 logger.info("Weekly reflection completed and resolved")
                 
             elif checkin_type == services['task'].CHECK_IN_TYPES['DAILY']:
-                logger.info("Handling daily check-in")
+                logger.info("Handling daily check-in from pending check-in")
                 handle_daily_checkin(user_id, message_text, instance_id, services, context)
                 services['task'].resolve_checkin(user_id, checkin_type, instance_id)
                 logger.info("Daily check-in completed and resolved")
                 
             elif checkin_type == services['task'].CHECK_IN_TYPES['MIDDAY']:
-                logger.info("Handling midday check-in")
+                logger.info("Handling midday check-in from pending check-in")
                 handle_midday_checkin(user_id, message_text, instance_id, services, context)
                 services['task'].resolve_checkin(user_id, checkin_type, instance_id)
                 logger.info("Midday check-in completed and resolved")
                 
             elif checkin_type == services['task'].CHECK_IN_TYPES['END_DAY']:
-                logger.info("Handling end-day check-in")
+                logger.info("Handling end-day check-in from pending check-in")
                 handle_end_day_checkin(user_id, message_text, instance_id, services, context)
                 services['task'].resolve_checkin(user_id, checkin_type, instance_id)
                 logger.info("End-day check-in completed and resolved")
@@ -307,8 +325,8 @@ def process_message(user_id: str, message_text: str, instance_id: str, services:
             )
             
         else:
-            logger.info("No pending check-ins found")
-            # No pending check-ins, handle as general message
+            logger.info("No active state or pending check-ins found")
+            # No pending check-ins or active state, handle as general message
             response = (
                 "I see you have no pending check-ins at the moment. "
                 "You can always use commands like:\n"
