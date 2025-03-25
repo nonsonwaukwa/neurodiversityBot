@@ -143,35 +143,44 @@ def webhook():
                 # Handle message events
                 if 'messages' in value:
                     for message in value['messages']:
+                        user_id = message.get('from')
+                        message_id = message.get('id')
+                        timestamp = int(message.get('timestamp', time.time()))
+                        
+                        # Skip old messages
+                        if not is_message_recent(timestamp):
+                            logger.info(f"Skipping old message {message_id} from timestamp {timestamp}")
+                            continue
+                        
+                        # Check for message deduplication using Firebase
+                        phone_number_id = value.get('metadata', {}).get('phone_number_id')
+                        instance_id = get_instance_from_phone_number(phone_number_id)
+                        
+                        if is_message_processed(message_id, instance_id):
+                            logger.info(f"Skipping duplicate message {message_id}")
+                            continue
+                        
+                        logger.info(f"Processing message {message_id} for instance {instance_id}")
+                        
+                        # Handle different message types
                         if message.get('type') == 'text':
-                            user_id = message.get('from')
                             message_text = message.get('text', {}).get('body')
-                            message_id = message.get('id')
-                            timestamp = int(message.get('timestamp', time.time()))
-                            
-                            # Skip old messages
-                            if not is_message_recent(timestamp):
-                                logger.info(f"Skipping old message {message_id} from timestamp {timestamp}")
-                                continue
-                            
-                            # Check for message deduplication using Firebase
-                            phone_number_id = value.get('metadata', {}).get('phone_number_id')
-                            instance_id = get_instance_from_phone_number(phone_number_id)
-                            
-                            if is_message_processed(message_id, instance_id):
-                                logger.info(f"Skipping duplicate message {message_id}")
-                                continue
-                            
-                            logger.info(f"Processing message {message_id} for instance {instance_id}")
                             logger.info(f"Message text: {message_text}")
-                            
-                            try:
-                                process_message(user_id, message_text, instance_id, instances[instance_id])
-                                mark_message_processed(message_id, instance_id, timestamp)
-                                logger.info(f"Successfully processed message {message_id}")
-                            except Exception as e:
-                                logger.error(f"Error processing message {message_id}: {str(e)}")
-                                raise
+                        elif message.get('type') == 'interactive':
+                            # Pass the entire interactive message object
+                            message_text = message
+                            logger.info(f"Interactive message: {message}")
+                        else:
+                            logger.warning(f"Unsupported message type: {message.get('type')}")
+                            continue
+                        
+                        try:
+                            process_message(user_id, message_text, instance_id, instances[instance_id])
+                            mark_message_processed(message_id, instance_id, timestamp)
+                            logger.info(f"Successfully processed message {message_id}")
+                        except Exception as e:
+                            logger.error(f"Error processing message {message_id}: {str(e)}")
+                            raise
                                 
                 elif 'statuses' in value:
                     # Only log recent status updates
@@ -239,6 +248,15 @@ def process_message(user_id: str, message_text: str, instance_id: str, services:
         if not user:
             logger.error(f"Failed to get/create user {user_id}")
             services['whatsapp'].stop_typing(user_id)
+            return
+
+        # For interactive messages, pass the entire message object
+        if isinstance(message_text, dict) and message_text.get('type') == 'interactive':
+            if current_state == 'WEEKLY_REFLECTION' or current_state == 'AWAITING_PLANNING_CHOICE':
+                logger.info("Processing interactive response for weekly reflection")
+                handle_weekly_reflection(user_id, message_text, instance_id, services, context)
+                return
+            # Add more interactive message handling for other states as needed
             return
 
         # Check for override commands first (these work in any state)
@@ -395,8 +413,21 @@ def handle_weekly_reflection(user_id: str, message_text: str, instance_id: str, 
         logger.info(f"Processing for user: {name}")
             
         # Check if this is a response to planning selection
-        if message_text.upper() in ['PLAN FOR THE WEEK', 'DAY BY DAY PLANNING']:
-            handle_planning_selection(user_id, message_text.upper(), instance_id, services, context)
+        # Handle both button responses and text responses
+        if (isinstance(message_text, dict) and 
+            message_text.get('type') == 'interactive' and 
+            message_text.get('interactive', {}).get('type') == 'button_reply'):
+            
+            button_response = message_text['interactive']['button_reply']
+            logger.info(f"Received button response: {button_response}")
+            
+            if button_response['id'] == 'weekly':
+                handle_planning_selection('PLAN FOR THE WEEK', user_id, instance_id, services, context)
+            elif button_response['id'] == 'daily':
+                handle_planning_selection('DAY BY DAY PLANNING', user_id, instance_id, services, context)
+            return
+        elif message_text.upper() in ['PLAN FOR THE WEEK', 'DAY BY DAY PLANNING']:
+            handle_planning_selection(message_text.upper(), user_id, instance_id, services, context)
             return
             
         # Analyze sentiment and determine planning type
@@ -477,7 +508,7 @@ def handle_weekly_reflection(user_id: str, message_text: str, instance_id: str, 
             "I'm having trouble processing your response right now. Could you try sharing your thoughts again?"
         )
 
-def handle_planning_selection(user_id: str, selection: str, instance_id: str, services: dict, context: dict):
+def handle_planning_selection(selection: str, user_id: str, instance_id: str, services: dict, context: dict):
     """Handle user's planning type selection."""
     try:
         user = User.get_or_create(user_id, instance_id)
