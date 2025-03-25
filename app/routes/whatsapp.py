@@ -254,6 +254,10 @@ def process_message(user_id: str, message_text: str, instance_id: str, services:
             logger.info("Processing weekly reflection based on state")
             handle_weekly_reflection(user_id, message_text, instance_id, services, context)
             return
+        elif current_state == 'WEEKLY_TASK_INPUT':
+            logger.info("Processing weekly task input based on state")
+            handle_weekly_task_input(user_id, message_text, instance_id, services, context)
+            return
         elif current_state == 'DAILY_CHECK_IN':
             logger.info("Processing daily check-in based on state")
             handle_daily_checkin(user_id, message_text, instance_id, services, context)
@@ -481,24 +485,24 @@ def handle_planning_selection(user_id: str, selection: str, instance_id: str, se
             logger.error(f"Failed to get/create user {user_id}")
             return
             
-        name = user.name.split('_')[0] if '_' in user.name else user.name
+        name = user.name.split('_')[0] if user.name and '_' in user.name else (user.name or "Friend")
         
         if selection == 'PLAN FOR THE WEEK':
             response = (
-                f"Excellent choice, {name}! Let's plan your week. 📝\n\n"
-                "Please share your main tasks or goals for the week ahead. "
-                "You can list them like this:\n\n"
-                "1. [Your first task]\n"
-                "2. [Your second task]\n"
-                "And so on..."
+                "Let's plan your tasks for the upcoming week. Please reply with your tasks in this format:\n\n"
+                "Monday: Task 1, Task 2, Task 3\n"
+                "Tuesday: Task 1, Task 2, Task 3\n"
+                "Wednesday: Task 1, Task 2, Task 3\n"
+                "Thursday: Task 1, Task 2, Task 3\n"
+                "Friday: Task 1, Task 2, Task 3"
             )
-            new_state = 'WEEKLY_TASK_SELECTION'
+            new_state = 'WEEKLY_TASK_INPUT'
             planning_type = 'weekly'
         else:  # DAY BY DAY PLANNING
             response = (
-                f"Perfect, {name}! We'll take it day by day. 🌅\n\n"
-                "Have a wonderful rest of your weekend! "
-                "I'll check in with you tomorrow morning to help plan your day."
+                f"Great choice! I'll be here every morning to help you set your daily tasks. "
+                "No pressure—just a little nudge to help you stay on track. "
+                "Looking forward to planning with you each day! 😊"
             )
             new_state = 'DAILY_CHECK_IN'
             planning_type = 'daily'
@@ -524,6 +528,81 @@ def handle_planning_selection(user_id: str, selection: str, instance_id: str, se
         )
         services['task'].update_user_state(
             user_id, 'DAILY_CHECK_IN', instance_id, {'planning_type': 'daily'}
+        )
+
+def handle_weekly_task_input(user_id: str, message_text: str, instance_id: str, services: dict, context: dict):
+    """Handle weekly task list input from user."""
+    try:
+        logger.info(f"Processing weekly task input for user {user_id}")
+        logger.info(f"Task input: {message_text}")
+        
+        # Parse the task input
+        tasks_by_day = {}
+        current_day = None
+        
+        # Split the input into lines and process each line
+        for line in message_text.split('\n'):
+            line = line.strip()
+            if not line:
+                continue
+                
+            # Check if line starts with a day
+            day_match = re.match(r'^(Monday|Tuesday|Wednesday|Thursday|Friday):\s*(.+)$', line, re.IGNORECASE)
+            if day_match:
+                current_day = day_match.group(1).capitalize()
+                tasks = [task.strip() for task in day_match.group(2).split(',')]
+                tasks_by_day[current_day] = tasks
+        
+        # Validate the input
+        expected_days = {'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'}
+        if not all(day in tasks_by_day for day in expected_days):
+            services['whatsapp'].send_message(
+                user_id,
+                "Could you please provide tasks for all weekdays (Monday through Friday)? "
+                "Make sure to follow the format:\n\n"
+                "Monday: Task 1, Task 2, Task 3\n"
+                "Tuesday: Task 1, Task 2, Task 3\n"
+                "And so on..."
+            )
+            return
+            
+        # Store tasks in Firebase
+        try:
+            services['task'].store_weekly_tasks(user_id, tasks_by_day, instance_id)
+            
+            # Send confirmation message
+            services['whatsapp'].send_message(
+                user_id,
+                "Got it! Your weekly plan is all set. I'll check in with you each day to remind you of your tasks. "
+                "You've got this! 💪"
+            )
+            
+            # Update user state
+            services['task'].update_user_state(
+                user_id,
+                'WEEKLY_PLANNING_COMPLETE',
+                instance_id,
+                {
+                    'weekly_tasks': tasks_by_day,
+                    'last_weekly_planning': int(time.time())
+                }
+            )
+            
+        except Exception as e:
+            logger.error(f"Error storing weekly tasks: {e}")
+            services['whatsapp'].send_message(
+                user_id,
+                "I had trouble saving your tasks. Could you try sending them again?"
+            )
+            
+    except Exception as e:
+        logger.error(f"Error processing weekly task input: {e}")
+        services['whatsapp'].send_message(
+            user_id,
+            "I had trouble understanding your task list. Could you make sure it follows the format:\n\n"
+            "Monday: Task 1, Task 2, Task 3\n"
+            "Tuesday: Task 1, Task 2, Task 3\n"
+            "And so on..."
         )
 
 def handle_daily_checkin(user_id: str, message_text: str, instance_id: str, services: dict, context: dict):

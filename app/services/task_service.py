@@ -524,3 +524,52 @@ class TaskService:
         except Exception as e:
             logger.error(f"Error resolving check-in: {str(e)}")
             raise 
+
+    def store_weekly_tasks(self, user_id: str, tasks_by_day: dict, instance_id: str) -> None:
+        """Store weekly tasks for a user.
+        
+        Args:
+            user_id (str): The user's ID
+            tasks_by_day (dict): Dictionary mapping days to lists of tasks
+            instance_id (str): The instance ID
+        """
+        try:
+            # Get user document reference
+            user_ref = self.db.collection('users').document(user_id)
+            
+            # Create weekly tasks document with timestamp
+            weekly_tasks_ref = user_ref.collection('weekly_tasks').document()
+            
+            # Format tasks with status
+            formatted_tasks = {}
+            for day, tasks in tasks_by_day.items():
+                formatted_tasks[day] = [
+                    {
+                        'task': task,
+                        'status': 'pending',
+                        'created_at': int(time.time())
+                    }
+                    for task in tasks
+                ]
+            
+            # Store the tasks
+            weekly_tasks_ref.set({
+                'tasks': formatted_tasks,
+                'created_at': int(time.time()),
+                'week_starting': self._get_week_start_timestamp(),
+                'instance_id': instance_id,
+                'status': 'active'
+            })
+            
+            logger.info(f"Stored weekly tasks for user {user_id}")
+            
+        except Exception as e:
+            logger.error(f"Error storing weekly tasks for user {user_id}: {e}")
+            raise
+
+    def _get_week_start_timestamp(self) -> int:
+        """Get the timestamp for the start of the current week (Monday)."""
+        today = datetime.now()
+        monday = today - timedelta(days=today.weekday())
+        monday = monday.replace(hour=0, minute=0, second=0, microsecond=0)
+        return int(monday.timestamp()) 
