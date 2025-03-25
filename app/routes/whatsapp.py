@@ -217,6 +217,9 @@ def process_message(user_id: str, message_text: str, instance_id: str, services:
     logger.info(f"Processing message from user {user_id} in instance {instance_id}")
     
     try:
+        # Start typing indicator before processing
+        services['whatsapp'].start_typing(user_id)
+        
         # Get user's current state
         user_state_data = services['task'].get_user_state(user_id, instance_id)
         current_state = user_state_data.get('state')
@@ -225,6 +228,7 @@ def process_message(user_id: str, message_text: str, instance_id: str, services:
         user = User.get_or_create(user_id, instance_id)
         if not user:
             logger.error(f"Failed to get/create user {user_id}")
+            services['whatsapp'].stop_typing(user_id)  # Stop typing if we fail
             return
         
         # Handle weekly reflection (Sunday check-in)
@@ -252,7 +256,7 @@ def process_message(user_id: str, message_text: str, instance_id: str, services:
                 # If no planning type determined, we're asking for clarification
                 services['task'].update_user_state(user_id, 'WEEKLY_REFLECTION', instance_id)
             
-            # Send response
+            # Send response (this will automatically stop typing)
             services['whatsapp'].send_message(user_id, response_message)
             logger.info(f"Sent weekly check-in response to user {user_id}")
             
@@ -263,6 +267,8 @@ def process_message(user_id: str, message_text: str, instance_id: str, services:
             
     except Exception as e:
         logger.error(f"Error processing message: {str(e)}")
+        # Make sure to stop typing if we encounter an error
+        services['whatsapp'].stop_typing(user_id)
         raise
 
 # For backward compatibility, redirect instance-specific routes to the main webhook

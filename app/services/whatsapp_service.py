@@ -36,6 +36,9 @@ class WhatsAppService:
             print(f"Warning: WhatsApp service for instance {self.instance_id} is not properly configured")
             return {'error': 'WhatsApp service not configured'}
             
+        # First stop typing indicator if it's active
+        self.stop_typing(to)
+            
         headers = {
             'Authorization': f'Bearer {self.access_token}',
             'Content-Type': 'application/json'
@@ -54,10 +57,65 @@ class WhatsAppService:
                 headers=headers,
                 json=payload
             )
-            response.raise_for_status()
             return response.json()
         except Exception as e:
-            print(f"Error sending message to {to}: {str(e)}")
+            print(f"Error sending message: {str(e)}")
+            return {'error': str(e)}
+
+    def start_typing(self, to: str) -> Dict[str, Any]:
+        """Start typing indicator for a user."""
+        if not self.is_configured:
+            print(f"Warning: WhatsApp service for instance {self.instance_id} is not properly configured")
+            return {'error': 'WhatsApp service not configured'}
+            
+        headers = {
+            'Authorization': f'Bearer {self.access_token}',
+            'Content-Type': 'application/json'
+        }
+        
+        payload = {
+            'messaging_product': 'whatsapp',
+            'to': to,
+            'status': 'typing'
+        }
+        
+        try:
+            response = requests.post(
+                f'{self.base_url}/messages/status',
+                headers=headers,
+                json=payload
+            )
+            return response.json()
+        except Exception as e:
+            print(f"Error starting typing indicator: {str(e)}")
+            return {'error': str(e)}
+            
+    def stop_typing(self, to: str) -> Dict[str, Any]:
+        """Stop typing indicator for a user."""
+        if not self.is_configured:
+            print(f"Warning: WhatsApp service for instance {self.instance_id} is not properly configured")
+            return {'error': 'WhatsApp service not configured'}
+            
+        headers = {
+            'Authorization': f'Bearer {self.access_token}',
+            'Content-Type': 'application/json'
+        }
+        
+        payload = {
+            'messaging_product': 'whatsapp',
+            'to': to,
+            'status': 'idle'
+        }
+        
+        try:
+            response = requests.post(
+                f'{self.base_url}/messages/status',
+                headers=headers,
+                json=payload
+            )
+            return response.json()
+        except Exception as e:
+            print(f"Error stopping typing indicator: {str(e)}")
             return {'error': str(e)}
 
     def send_template_message(self, to: str, template_name: str, language_code: str, components: list) -> Dict[str, Any]:
