@@ -3,11 +3,17 @@ from typing import Dict, Any
 import requests
 import random
 import json
+import logging
+
+# Set up logging
+logger = logging.getLogger(__name__)
 
 class SentimentService:
     def __init__(self):
         self.api_key = os.getenv('DEEPSEEK_API_KEY')
         self.base_url = 'https://api.deepseek.com/v1/chat/completions'
+        if not self.api_key:
+            logger.error("DEEPSEEK_API_KEY not found in environment variables")
         
     def analyze_sentiment(self, text: str) -> Dict[str, Any]:
         """Analyze the sentiment of the given text with special attention to neurodivergent expression patterns."""
@@ -174,83 +180,85 @@ Please provide the analysis in JSON format with these fields:
 
     def analyze_weekly_checkin(self, text: str) -> Dict[str, Any]:
         """Analyze weekly check-in response and determine planning type."""
+        logger.info(f"Analyzing weekly check-in text: {text}")
+        
         headers = {
             'Authorization': f'Bearer {self.api_key}',
             'Content-Type': 'application/json'
         }
         
-        try:
-            response = requests.post(
-                self.base_url,
-                headers=headers,
-                json={
-                    'model': 'deepseek-chat',
-                    'messages': [
-                        {'role': 'system', 'content': 'You are an expert in analyzing communication patterns of neurodivergent individuals, with special focus on determining appropriate planning approaches.'},
-                        {'role': 'user', 'content': f"""Analyze this weekly check-in response and determine the appropriate planning type:
+        prompt = f"""Analyze this weekly check-in response and determine the appropriate planning type:
 
 Text: {text}
 
 Please analyze for:
-1. Overall emotional state (overwhelmed/burnt out vs. okay/neutral/good)
-2. Energy level (high, medium, low)
-3. Stress level (high, medium, low)
-4. Key emotions
-5. Need for immediate support
+1. Overall emotional state (positive/negative/neutral)
+2. Energy level (high/medium/low)
+3. Planning preference (structured/flexible)
+4. Key emotions expressed
+5. Need for support level (high/medium/low)
 
-For neurodivergent individuals, consider that:
-- Brief responses might indicate overwhelm rather than disinterest
-- "Okay" might mean actually okay or might be masking difficulty
-- Direct communication about struggles is valuable
-- Variable punctuation/capitalization may express emotion
-
-Return ONLY a JSON object with these exact fields (no markdown, no code blocks):
+Return the analysis in this exact JSON format:
 {{
-  "emotional_state": "overwhelmed/okay",
-  "energy_level": "high/medium/low",
-  "stress_level": "high/medium/low",
-  "emotions": ["emotion1", "emotion2"],
-  "needs_support": true/false,
-  "planning_type": "daily/weekly",
-  "confidence_score": 0.0-1.0
-}}"""}
-                    ],
-                    'temperature': 0.3
-                }
+    "emotional_state": "positive/negative/neutral",
+    "energy_level": "high/medium/low",
+    "planning_type": "weekly/daily",
+    "support_needed": "high/medium/low",
+    "key_emotions": ["emotion1", "emotion2"],
+    "recommended_approach": "structured/flexible"
+}}"""
+
+        payload = {
+            'model': 'deepseek-chat',
+            'messages': [
+                {'role': 'system', 'content': 'You are an expert in analyzing communication patterns of neurodivergent individuals, with special focus on determining appropriate planning approaches.'},
+                {'role': 'user', 'content': prompt}
+            ],
+            'temperature': 0.3
+        }
+        
+        try:
+            logger.info("Sending request to Deepseek API")
+            response = requests.post(
+                self.base_url,
+                headers=headers,
+                json=payload
             )
+            
+            logger.info(f"Received response from Deepseek API: {response.status_code}")
             
             if response.status_code == 200:
                 result = response.json()
-                content = result['choices'][0]['message']['content']
-                
-                # Remove any markdown formatting or code blocks
-                content = content.replace('```json', '').replace('```', '').strip()
+                logger.info(f"Raw API response: {result}")
                 
                 try:
-                    analysis = json.loads(content)
+                    analysis = json.loads(result['choices'][0]['message']['content'])
+                    logger.info(f"Parsed sentiment analysis: {analysis}")
                     return analysis
                 except json.JSONDecodeError as e:
-                    print(f"Failed to parse weekly check-in analysis: {content}")
-                    print(f"JSON decode error: {str(e)}")
-                    return self._get_default_weekly_analysis()
+                    logger.error(f"Failed to parse API response: {e}")
+                    logger.error(f"Raw content: {result['choices'][0]['message']['content']}")
+                    return self._get_default_sentiment()
             else:
-                print(f"API error ({response.status_code}): {response.text}")
-                return self._get_default_weekly_analysis()
+                logger.error(f"API error ({response.status_code}): {response.text}")
+                return self._get_default_sentiment()
+                
         except Exception as e:
-            print(f"Exception in weekly check-in analysis: {str(e)}")
-            return self._get_default_weekly_analysis()
-
-    def _get_default_weekly_analysis(self) -> Dict[str, Any]:
-        """Return a default weekly check-in analysis."""
-        return {
-            'emotional_state': 'okay',
+            logger.error(f"Exception in sentiment analysis: {str(e)}")
+            return self._get_default_sentiment()
+            
+    def _get_default_sentiment(self) -> Dict[str, Any]:
+        """Return a default sentiment analysis with a balanced perspective."""
+        default = {
+            'emotional_state': 'neutral',
             'energy_level': 'medium',
-            'stress_level': 'medium',
-            'emotions': ['neutral'],
-            'needs_support': False,
-            'planning_type': 'weekly',
-            'confidence_score': 0.5
+            'planning_type': 'daily',
+            'support_needed': 'medium',
+            'key_emotions': ['neutral'],
+            'recommended_approach': 'flexible'
         }
+        logger.info(f"Using default sentiment: {default}")
+        return default
 
     def generate_weekly_response(self, analysis: Dict[str, Any], user_name: str) -> Dict[str, str]:
         """Generate a response for the weekly check-in based on sentiment analysis."""

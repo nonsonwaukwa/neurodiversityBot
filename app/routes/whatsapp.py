@@ -215,6 +215,7 @@ def generate_response(user: User, sentiment_data: dict) -> str:
 def process_message(user_id: str, message_text: str, instance_id: str, services: dict):
     """Process an incoming message from a user."""
     logger.info(f"Processing message from user {user_id} in instance {instance_id}")
+    logger.info(f"Message text: {message_text}")
     
     try:
         # Start typing indicator before processing
@@ -224,10 +225,14 @@ def process_message(user_id: str, message_text: str, instance_id: str, services:
         user_state_data = services['task'].get_user_state(user_id, instance_id)
         current_state = user_state_data.get('state')
         context = user_state_data.get('context', {})
+        logger.info(f"Current user state: {current_state}")
+        logger.info(f"Current context: {context}")
         
         # Get pending check-ins
         pending_checkins = context.get('pending_checkins', [])
         current_checkin = context.get('current_checkin_source')
+        logger.info(f"Pending check-ins: {pending_checkins}")
+        logger.info(f"Current check-in source: {current_checkin}")
         
         # Get or create user
         user = User.get_or_create(user_id, instance_id)
@@ -239,6 +244,7 @@ def process_message(user_id: str, message_text: str, instance_id: str, services:
         # Check for override commands first (these work in any state)
         command_match = re.match(r'^(DONE|PROGRESS|STUCK)\s+(\d+)$', message_text.upper())
         if command_match:
+            logger.info(f"Detected task command: {command_match.group(0)}")
             response = handle_task_command(user_id, command_match, instance_id, services)
             services['whatsapp'].send_message(user_id, response)
             return
@@ -248,13 +254,16 @@ def process_message(user_id: str, message_text: str, instance_id: str, services:
             # Sort check-ins by time added
             sorted_checkins = sorted(pending_checkins, key=lambda x: x['added_at'])
             oldest_checkin = sorted_checkins[0]['type']
+            logger.info(f"Processing oldest pending check-in: {oldest_checkin}")
             
             # If we're already in a check-in flow, continue with it
             if current_checkin:
                 checkin_type = current_checkin
+                logger.info(f"Continuing with current check-in: {checkin_type}")
             else:
                 # Start with the oldest pending check-in
                 checkin_type = oldest_checkin
+                logger.info(f"Starting new check-in: {checkin_type}")
                 # Update the current check-in source
                 services['task'].update_user_state(
                     user_id,
@@ -265,22 +274,31 @@ def process_message(user_id: str, message_text: str, instance_id: str, services:
 
             # Handle the check-in based on type
             if checkin_type == services['task'].CHECK_IN_TYPES['WEEKLY']:
+                logger.info("Handling weekly reflection")
                 handle_weekly_reflection(user_id, message_text, instance_id, services, context)
                 services['task'].resolve_checkin(user_id, checkin_type, instance_id)
+                logger.info("Weekly reflection completed and resolved")
                 
             elif checkin_type == services['task'].CHECK_IN_TYPES['DAILY']:
+                logger.info("Handling daily check-in")
                 handle_daily_checkin(user_id, message_text, instance_id, services, context)
                 services['task'].resolve_checkin(user_id, checkin_type, instance_id)
+                logger.info("Daily check-in completed and resolved")
                 
             elif checkin_type == services['task'].CHECK_IN_TYPES['MIDDAY']:
+                logger.info("Handling midday check-in")
                 handle_midday_checkin(user_id, message_text, instance_id, services, context)
                 services['task'].resolve_checkin(user_id, checkin_type, instance_id)
+                logger.info("Midday check-in completed and resolved")
                 
             elif checkin_type == services['task'].CHECK_IN_TYPES['END_DAY']:
+                logger.info("Handling end-day check-in")
                 handle_end_day_checkin(user_id, message_text, instance_id, services, context)
                 services['task'].resolve_checkin(user_id, checkin_type, instance_id)
+                logger.info("End-day check-in completed and resolved")
             
             # Clear current check-in source after handling
+            logger.info("Clearing current check-in source")
             services['task'].update_user_state(
                 user_id,
                 current_state,
@@ -289,6 +307,7 @@ def process_message(user_id: str, message_text: str, instance_id: str, services:
             )
             
         else:
+            logger.info("No pending check-ins found")
             # No pending check-ins, handle as general message
             response = (
                 "I see you have no pending check-ins at the moment. "
@@ -335,6 +354,10 @@ def handle_task_command(user_id: str, command_match: re.Match, instance_id: str,
 def handle_weekly_reflection(user_id: str, message_text: str, instance_id: str, services: dict, context: dict):
     """Handle weekly reflection flow."""
     try:
+        logger.info(f"Starting weekly reflection handler for user {user_id}")
+        logger.info(f"Message text: {message_text}")
+        logger.info(f"Current context: {context}")
+        
         # Get user
         user = User.get_or_create(user_id, instance_id)
         if not user:
@@ -342,19 +365,23 @@ def handle_weekly_reflection(user_id: str, message_text: str, instance_id: str, 
             return
             
         # Analyze sentiment and determine planning type
+        logger.info("Calling sentiment analysis service")
         analysis = services['sentiment'].analyze_weekly_checkin(message_text)
-        logger.info(f"Weekly check-in analysis: {analysis}")
+        logger.info(f"Weekly check-in analysis result: {analysis}")
         
         # Update context with analysis results
         context_updates = {
             'emotional_state': analysis.get('emotional_state'),
             'energy_level': analysis.get('energy_level'),
             'planning_type': analysis.get('planning_type'),
+            'support_needed': analysis.get('support_needed'),
             'last_weekly_checkin': int(time.time())
         }
+        logger.info(f"Context updates: {context_updates}")
         
         # Generate response based on sentiment
         name = user.name.split('_')[0] if '_' in user.name else user.name
+        logger.info(f"Generating response for user {name}")
         
         # Build response based on emotional state
         if analysis.get('emotional_state') == 'positive':
@@ -384,18 +411,19 @@ def handle_weekly_reflection(user_id: str, message_text: str, instance_id: str, 
                 "3. Starting with today and seeing how it goes?"
             )
         
+        logger.info(f"Sending response to user: {response}")
+        
         # Send response
         services['whatsapp'].send_message(user_id, response)
         
         # Update state based on planning type
-        if analysis.get('planning_type') == 'daily':
-            services['task'].update_user_state(
-                user_id, 'DAILY_CHECK_IN', instance_id, context_updates
-            )
-        else:
-            services['task'].update_user_state(
-                user_id, 'WEEKLY_TASK_SELECTION', instance_id, context_updates
-            )
+        new_state = 'DAILY_CHECK_IN' if analysis.get('planning_type') == 'daily' else 'WEEKLY_TASK_SELECTION'
+        logger.info(f"Updating user state to: {new_state}")
+        
+        services['task'].update_user_state(
+            user_id, new_state, instance_id, context_updates
+        )
+        logger.info("Weekly reflection handler completed successfully")
             
     except Exception as e:
         logger.error(f"Error handling weekly reflection for user {user_id}: {e}")
