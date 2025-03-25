@@ -567,33 +567,19 @@ def handle_weekly_task_input(user_id: str, message_text: str, instance_id: str, 
         logger.info(f"Processing weekly task input for user {user_id}")
         logger.info(f"Task input: {message_text}")
         
-        # Parse the task input
-        tasks_by_day = {}
-        current_day = None
+        # Parse and validate the task input
+        tasks_by_day, error_message = parse_task_input(message_text)
         
-        # Split the input into lines and process each line
-        for line in message_text.split('\n'):
-            line = line.strip()
-            if not line:
-                continue
-                
-            # Check if line starts with a day
-            day_match = re.match(r'^(Monday|Tuesday|Wednesday|Thursday|Friday):\s*(.+)$', line, re.IGNORECASE)
-            if day_match:
-                current_day = day_match.group(1).capitalize()
-                tasks = [task.strip() for task in day_match.group(2).split(',')]
-                tasks_by_day[current_day] = tasks
-        
-        # Validate the input
-        expected_days = {'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'}
-        if not all(day in tasks_by_day for day in expected_days):
+        if error_message:
             services['whatsapp'].send_message(
                 user_id,
-                "Could you please provide tasks for all weekdays (Monday through Friday)? "
-                "Make sure to follow the format:\n\n"
+                f"{error_message}\n\n"
+                "Please provide your tasks in this format:\n\n"
                 "Monday: Task 1, Task 2, Task 3\n"
                 "Tuesday: Task 1, Task 2, Task 3\n"
-                "And so on..."
+                "Wednesday: Task 1, Task 2, Task 3\n"
+                "Thursday: Task 1, Task 2, Task 3\n"
+                "Friday: Task 1, Task 2, Task 3"
             )
             return
             
@@ -601,11 +587,26 @@ def handle_weekly_task_input(user_id: str, message_text: str, instance_id: str, 
         try:
             services['task'].store_weekly_tasks(user_id, tasks_by_day, instance_id)
             
+            # Count total tasks for encouragement message
+            total_tasks = sum(len(tasks) for tasks in tasks_by_day.values())
+            
+            # Generate encouraging message based on task count
+            if total_tasks > 15:
+                encouragement = "That's an ambitious week ahead! Remember to pace yourself. 🌟"
+            elif total_tasks > 10:
+                encouragement = "Looks like a productive week ahead! You've got this! 💪"
+            else:
+                encouragement = "Nice and focused plan for the week! Quality over quantity! ✨"
+            
             # Send confirmation message
             services['whatsapp'].send_message(
                 user_id,
-                "Got it! Your weekly plan is all set. I'll check in with you each day to remind you of your tasks. "
-                "You've got this! 💪"
+                f"Got it! Your weekly plan is all set. {encouragement}\n\n"
+                "I'll check in with you each day to remind you of your tasks. "
+                "You can always update your progress using:\n"
+                "DONE [task number]\n"
+                "PROGRESS [task number]\n"
+                "STUCK [task number]"
             )
             
             # Update user state
@@ -615,7 +616,8 @@ def handle_weekly_task_input(user_id: str, message_text: str, instance_id: str, 
                 instance_id,
                 {
                     'weekly_tasks': tasks_by_day,
-                    'last_weekly_planning': int(time.time())
+                    'last_weekly_planning': int(time.time()),
+                    'total_tasks': total_tasks
                 }
             )
             
@@ -630,7 +632,7 @@ def handle_weekly_task_input(user_id: str, message_text: str, instance_id: str, 
         logger.error(f"Error processing weekly task input: {e}")
         services['whatsapp'].send_message(
             user_id,
-            "I had trouble understanding your task list. Could you make sure it follows the format:\n\n"
+            "I had trouble understanding your task list. Please make sure it follows the format:\n\n"
             "Monday: Task 1, Task 2, Task 3\n"
             "Tuesday: Task 1, Task 2, Task 3\n"
             "And so on..."
