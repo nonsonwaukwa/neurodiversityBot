@@ -23,10 +23,11 @@ class User:
     EMOTION_NEUTRAL = 'neutral'
     EMOTION_OVERWHELMED = 'overwhelmed'
     
-    def __init__(self, user_id: str, name: str = None):
+    def __init__(self, user_id: str, name: str = None, account_index: int = 1):
         self.user_id = user_id
         self.name = name
-        self.state = self.STATE_INITIAL
+        self.account_index = account_index
+        self.state = None
         self.context = {
             'flow_type': None,
             'last_check_in': None,  # Timestamp of last check-in
@@ -141,6 +142,7 @@ class User:
         return {
             'user_id': self.user_id,
             'name': self.name,
+            'account_index': self.account_index,
             'state': self.state,
             'context': self.context
         }
@@ -151,8 +153,12 @@ class User:
         if not data:
             return None
             
-        user = cls(data.get('user_id'), data.get('name'))
-        user.state = data.get('state', cls.STATE_INITIAL)
+        user = cls(
+            user_id=data.get('user_id'),
+            name=data.get('name'),
+            account_index=data.get('account_index', 1)
+        )
+        user.state = data.get('state')
         user.context = data.get('context', {
             'flow_type': None,
             'last_check_in': None,
@@ -195,27 +201,24 @@ class User:
 
     @staticmethod
     def get_all():
-        """Get all users from the database"""
-        users = []
-        for instance_id in ['instance1', 'instance2']:  # Add more instances as needed
-            users_ref = db.collection('instances').document(instance_id).collection('users')
-            for user_doc in users_ref.stream():
-                user_data = user_doc.to_dict()
-                # Extract the instance number from instance_id (e.g., 'instance1' -> 1)
-                account_index = int(instance_id.replace('instance', ''))
-                user = User(
-                    user_id=user_doc.id,
-                    name=user_data.get('name', ''),
-                    account_index=account_index
-                )
-                user.planning_schedule = user_data.get('planning_schedule', 'daily')
-                user.weekly_tasks = user_data.get('weekly_tasks', [])
-                user.last_weekly_checkin = user_data.get('last_weekly_checkin')
-                user.last_week_sentiment = user_data.get('last_week_sentiment')
-                user.state = user_data.get('state')
-                user.last_state_update = user_data.get('last_state_update')
-                users.append(user)
-        return users
+        """Get all users from Firebase."""
+        try:
+            from firebase_admin import firestore
+            db = firestore.client()
+            users_ref = db.collection('users')
+            users = []
+            
+            for doc in users_ref.stream():
+                user_data = doc.to_dict()
+                user_data['user_id'] = doc.id
+                user = User.from_dict(user_data)
+                if user:
+                    users.append(user)
+            
+            return users
+        except Exception as e:
+            logger.error(f"Error getting all users: {str(e)}", exc_info=True)
+            return []
 
     @staticmethod
     def get_or_create(user_id: str, instance_id: str) -> 'User':
