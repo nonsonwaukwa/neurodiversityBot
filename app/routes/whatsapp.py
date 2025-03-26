@@ -637,24 +637,55 @@ def handle_weekly_task_input(user_id: str, message_text: str, instance_id: str, 
 
 def handle_daily_checkin(user_id: str, message_text: str, instance_id: str, services: dict, context: dict):
     """Handle daily check-in flow."""
-    # Analyze sentiment
-    analysis = services['sentiment'].analyze_sentiment(message_text)
-    
-    # Update context
-    context_updates = {
-        'emotional_state': analysis.get('emotional_state'),
-        'energy_level': analysis.get('energy_level'),
-        'last_check_in': int(time.time())
-    }
-    
-    # Generate appropriate response based on sentiment
-    response = services['sentiment'].generate_daily_response(analysis, user.name)
-    services['whatsapp'].send_message(user_id, response)
-    
-    # Move to task selection
-    services['task'].update_user_state(
-        user_id, 'DAILY_TASK_SELECTION', instance_id, context_updates
-    )
+    try:
+        # Get user object
+        user = User.get_or_create(user_id, instance_id)
+        if not user:
+            logger.error(f"Failed to get/create user {user_id}")
+            services['whatsapp'].send_message(
+                user_id,
+                "I'm having trouble accessing your information. Could you try again in a moment?"
+            )
+            return
+            
+        # Analyze sentiment
+        analysis = services['sentiment'].analyze_daily_checkin(message_text)
+        logger.info(f"Daily check-in analysis for user {user_id}: {analysis}")
+        
+        # Update context
+        context_updates = {
+            'emotional_state': analysis.get('emotional_state'),
+            'energy_level': analysis.get('energy_level'),
+            'last_check_in': int(time.time())
+        }
+        
+        # Generate appropriate response based on sentiment
+        response = services['sentiment'].generate_daily_response(user, analysis)
+        services['whatsapp'].send_message(user_id, response)
+        
+        # Update user state based on response content
+        if "plan your tasks" in response.lower():
+            new_state = User.STATE_DAILY_TASK_INPUT
+        elif "self-care" in response.lower():
+            new_state = User.STATE_SELF_CARE_DAY
+        elif "break down" in response.lower():
+            new_state = User.STATE_DAILY_TASK_BREAKDOWN
+        else:
+            new_state = User.STATE_DAILY_TASK_SELECTION
+            
+        # Update user state
+        services['task'].update_user_state(
+            user_id, new_state, instance_id, context_updates
+        )
+        
+        logger.info(f"Updated user {user_id} state to {new_state}")
+        
+    except Exception as e:
+        logger.error(f"Error handling daily check-in for user {user_id}: {str(e)}", exc_info=True)
+        services['whatsapp'].send_message(
+            user_id,
+            "I'm having trouble processing your response right now. Could you try sharing your thoughts again?"
+        )
 
 # For backward compatibility, redirect instance-specific routes to the main webhook
 @bp.route('/<instance_id>', methods=['GET'])
