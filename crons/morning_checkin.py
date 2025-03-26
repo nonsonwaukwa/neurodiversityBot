@@ -1,7 +1,6 @@
 import os
 import sys
 from pathlib import Path
-import json
 
 # Add the project root directory to the Python path
 project_root = str(Path(__file__).parent.parent)
@@ -11,6 +10,7 @@ from app.models.user import User
 from app.models.checkin import CheckIn
 from app.services.whatsapp_service import get_whatsapp_service
 from app.services.sentiment_service import SentimentService
+from app.services.firebase import db
 import logging
 from datetime import datetime
 
@@ -26,7 +26,41 @@ def send_morning_checkin():
     """Send morning energy check-in messages to all users"""
     logger.info("Running morning check-in cron job")
     
-    users = User.get_all()
+    # Get users from all instances
+    users = []
+    for instance_id in ['instance1', 'instance2']:  # Add more instances as needed
+        try:
+            users_ref = db.collection('instances').document(instance_id).collection('users')
+            instance_users = users_ref.stream()
+            
+            for user_doc in instance_users:
+                try:
+                    user_data = user_doc.to_dict()
+                    account_index = int(instance_id.replace('instance', ''))
+                    
+                    # Create user object
+                    user = User(
+                        user_id=user_doc.id,
+                        name=user_data.get('name', ''),
+                        account_index=account_index
+                    )
+                    
+                    # Set user properties from data
+                    user.state = user_data.get('state')
+                    user.planning_type = user_data.get('planning_schedule', 'daily')
+                    user.context['weekly_tasks'] = user_data.get('weekly_tasks', {})
+                    user.last_checkin = user_data.get('last_check_in')
+                    
+                    users.append(user)
+                    logger.info(f"Loaded user {user_doc.id} from {instance_id}")
+                    
+                except Exception as e:
+                    logger.error(f"Error loading user {user_doc.id} from {instance_id}: {str(e)}", exc_info=True)
+                    continue
+                    
+        except Exception as e:
+            logger.error(f"Error accessing instance {instance_id}: {str(e)}", exc_info=True)
+            continue
     
     if not users:
         logger.info("No users found for morning check-in")
@@ -37,10 +71,9 @@ def send_morning_checkin():
     # Group users by account
     users_by_account = {}
     for user in users:
-        account_index = user.account_index
-        if account_index not in users_by_account:
-            users_by_account[account_index] = []
-        users_by_account[account_index].append(user)
+        if user.account_index not in users_by_account:
+            users_by_account[user.account_index] = []
+        users_by_account[user.account_index].append(user)
     
     logger.info(f"Processing users across {len(users_by_account)} accounts")
     
@@ -74,29 +107,32 @@ def send_morning_checkin():
                         continue
                 
                 # If user is in weekly reflection, don't interrupt
-                if user.state == 'WEEKLY_REFLECTION':
+                if user.state == User.STATE_WEEKLY_REFLECTION:
                     logger.info(
                         f"User {user.user_id} is in weekly reflection state - "
                         "skipping daily check-in"
                     )
                     continue
                 
-                # Log emotional state if available
-                if user.emotional_state:
-                    logger.info(
-                        f"User {user.user_id} - Current Emotional State: {user.emotional_state}, "
-                        f"Energy Level: {user.energy_level}"
-                    )
+                # Build personalized message
+                message_parts = [
+                    f"Good morning {name}! 🌅\n\n",
+                    "How are you feeling today? Take a moment to check in with yourself. "
+                    "Your energy levels, mood, or any thoughts you'd like to share - "
+                    "it all helps me understand how to best support you. 💭\n\n",
+                    "You can send a voice note or text - whatever feels easier to express yourself with."
+                ]
                 
-                # Handle based on planning type
-                if user.planning_type == 'weekly':
-                    logger.info(f"User {user.user_id} - Processing weekly plan check-in")
-                    _send_weekly_plan_checkin(user, whatsapp_service, instance_id)
-                else:
-                    logger.info(f"User {user.user_id} - Processing daily plan check-in")
-                    _send_daily_plan_checkin(user, whatsapp_service, instance_id)
+                # Combine all parts
+                checkin_message = "".join(message_parts)
+                
+                logger.info(f"Sending morning check-in to user {user.user_id}")
+                response = whatsapp_service.send_message(user.user_id, checkin_message)
                 
                 if response:
+                    # Store this message as a check-in and update user state
+                    CheckIn.create(user.user_id, checkin_message, CheckIn.TYPE_MORNING)
+                    user.update_user_state('DAILY_CHECK_IN')
                     logger.info(f"Successfully sent morning check-in to user {user.user_id}")
                 else:
                     logger.error(f"Failed to send morning check-in to user {user.user_id}")
@@ -106,91 +142,6 @@ def send_morning_checkin():
                     f"Error sending morning check-in to user {user.user_id}: {str(e)}",
                     exc_info=True
                 )
-
-def _send_weekly_plan_checkin(user, whatsapp_service, instance_id):
-    """Send check-in for users on weekly planning."""
-    name = user.name.split('_')[0] if '_' in user.name else user.name
-    current_day = datetime.now().strftime("%A")
-    tasks = user.weekly_tasks.get(current_day, [])
-    
-    logger.info(
-        f"User {user.user_id} - Weekly Plan Check-in:\n"
-        f"Current Day: {current_day}\n"
-        f"Tasks Available: {bool(tasks)}\n"
-        f"Number of Tasks: {len(tasks) if tasks else 0}"
-    )
-    
-    if tasks:
-        logger.info(f"User {user.user_id} - Today's Tasks:\n{json.dumps(tasks, indent=2)}")
-    
-    if not tasks:
-        message = (
-            f"Good morning {name}! 🌅\n\n"
-            "I notice you don't have any tasks set for today. "
-            "Would you like to plan some tasks for the day?\n\n"
-            "Please list them like this:\n"
-            "1. First task\n"
-            "2. Second task\n"
-            "3. Third task"
-        )
-        logger.info(f"User {user.user_id} - No tasks found, requesting new tasks")
-    else:
-        task_list = "\n".join(f"{i+1}. {task}" for i, task in enumerate(tasks))
-        message = (
-            f"Good morning {name}! 🌅\n\n"
-            f"Here are your tasks for today:\n\n{task_list}\n\n"
-            "How are you feeling about tackling these tasks? Share your thoughts with me, "
-            "and I'll help you plan accordingly. 💭"
-        )
-        logger.info(f"User {user.user_id} - Displaying existing tasks and requesting feelings")
-    
-    response = whatsapp_service.send_message(user.user_id, message)
-    
-    # Store check-in and update user state
-    checkin = CheckIn.create(user.user_id, message, CheckIn.TYPE_MORNING)
-    user.update_user_state('DAILY_CHECK_IN')
-    
-    logger.info(
-        f"User {user.user_id} - Check-in created:\n"
-        f"Check-in ID: {checkin.id}\n"
-        f"New State: DAILY_CHECK_IN"
-    )
-
-def _send_daily_plan_checkin(user, whatsapp_service, instance_id):
-    """Send check-in for users on daily planning."""
-    name = user.name.split('_')[0] if '_' in user.name else user.name
-    
-    # Log any focus task if it exists
-    if user.focus_task:
-        logger.info(
-            f"User {user.user_id} - Has focus task:\n"
-            f"Task: {user.focus_task}\n"
-            f"Breakdown: {json.dumps(user.task_breakdown, indent=2) if user.task_breakdown else 'No breakdown'}"
-        )
-    
-    # Log self-care day status
-    if user.is_self_care_day:
-        logger.info(f"User {user.user_id} - Currently on a self-care day")
-    
-    message = (
-        f"Good morning {name}! 🌅\n\n"
-        "How are you feeling today? Take a moment to check in with yourself. "
-        "Your energy levels, mood, or any thoughts you'd like to share - "
-        "it all helps me understand how to best support you. 💭\n\n"
-        "You can send a voice note or text - whatever feels easier to express yourself with."
-    )
-    
-    response = whatsapp_service.send_message(user.user_id, message)
-    
-    # Store check-in and update user state
-    checkin = CheckIn.create(user.user_id, message, CheckIn.TYPE_MORNING)
-    user.update_user_state('DAILY_CHECK_IN')
-    
-    logger.info(
-        f"User {user.user_id} - Daily plan check-in created:\n"
-        f"Check-in ID: {checkin.id}\n"
-        f"New State: DAILY_CHECK_IN"
-    )
 
 if __name__ == "__main__":
     try:
