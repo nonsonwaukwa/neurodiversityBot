@@ -604,10 +604,6 @@ def handle_weekly_task_input(user_id: str, message_text: str, instance_id: str, 
                 user_id,
                 f"Got it! Your weekly plan is all set. {encouragement}\n\n"
                 "I'll check in with you each day to remind you of your tasks. "
-                "You can always update your progress using:\n"
-                "DONE [task number]\n"
-                "PROGRESS [task number]\n"
-                "STUCK [task number]"
             )
             
             # Update user state
