@@ -4,16 +4,194 @@ from app.services.firebase import db
 from firebase_admin import firestore
 
 class User:
-    def __init__(self, user_id, name, account_index=1):
+    # Planning Types
+    PLANNING_TYPE_WEEKLY = 'weekly'
+    PLANNING_TYPE_DAILY = 'daily'
+    
+    # User States
+    STATE_INITIAL = 'INITIAL'
+    STATE_WEEKLY_REFLECTION = 'WEEKLY_REFLECTION'
+    STATE_WEEKLY_TASK_INPUT = 'WEEKLY_TASK_INPUT'
+    STATE_WEEKLY_PLANNING_COMPLETE = 'WEEKLY_PLANNING_COMPLETE'
+    STATE_DAILY_CHECKIN = 'DAILY_CHECKIN'
+    STATE_DAILY_TASK_INPUT = 'DAILY_TASK_INPUT'
+    STATE_DAILY_TASK_BREAKDOWN = 'DAILY_TASK_BREAKDOWN'
+    STATE_SELF_CARE_DAY = 'SELF_CARE_DAY'
+    
+    # Emotional States
+    EMOTION_POSITIVE = 'positive'
+    EMOTION_NEUTRAL = 'neutral'
+    EMOTION_OVERWHELMED = 'overwhelmed'
+    
+    def __init__(self, user_id: str, name: str = None):
         self.user_id = user_id
         self.name = name
-        self.account_index = account_index
-        self.planning_schedule = 'daily'  # 'daily' or 'weekly'
-        self.weekly_tasks = []  # For users on weekly schedule
-        self.last_weekly_checkin = None  # Unix timestamp
-        self.last_week_sentiment = None
-        self.state = None
-        self.last_state_update = None  # Unix timestamp
+        self.state = self.STATE_INITIAL
+        self.context = {
+            'flow_type': None,
+            'last_check_in': None,  # Timestamp of last check-in
+            'last_task_update': None,
+            'current_tasks': [],
+            'planning_type': None,  # 'weekly' or 'daily'
+            'emotional_state': None,
+            'energy_level': None,
+            'pending_checkins': [],
+            'current_checkin_source': None,
+            'missed_checkins': [],
+            'weekly_tasks': {},  # Dictionary of tasks by day
+            'daily_tasks': [],   # List of tasks for today
+            'focus_task': None,  # Single task for overwhelmed days
+            'task_breakdown': [], # Steps for broken down task
+            'self_care_day': False,
+            'last_weekly_planning': None,
+            'daily_checkin_time': None,
+            'midday_checkin_time': None,
+            'endday_checkin_time': None
+        }
+        
+    @property
+    def last_checkin(self):
+        """Get the timestamp of the last check-in."""
+        return self.context.get('last_check_in')
+    
+    @last_checkin.setter
+    def last_checkin(self, timestamp):
+        """Set the timestamp of the last check-in."""
+        self.context['last_check_in'] = timestamp
+    
+    @property
+    def planning_type(self):
+        """Get the user's planning type."""
+        return self.context.get('planning_type')
+    
+    @planning_type.setter
+    def planning_type(self, value):
+        """Set the user's planning type."""
+        if value not in [self.PLANNING_TYPE_WEEKLY, self.PLANNING_TYPE_DAILY]:
+            raise ValueError("Planning type must be 'weekly' or 'daily'")
+        self.context['planning_type'] = value
+    
+    @property
+    def emotional_state(self):
+        """Get the user's emotional state."""
+        return self.context.get('emotional_state')
+    
+    @emotional_state.setter
+    def emotional_state(self, value):
+        """Set the user's emotional state."""
+        self.context['emotional_state'] = value
+    
+    @property
+    def is_overwhelmed(self):
+        """Check if user is in an overwhelmed state."""
+        return self.emotional_state == self.EMOTION_OVERWHELMED
+    
+    @property
+    def daily_tasks(self):
+        """Get user's daily tasks."""
+        return self.context.get('daily_tasks', [])
+    
+    @daily_tasks.setter
+    def daily_tasks(self, tasks):
+        """Set user's daily tasks."""
+        self.context['daily_tasks'] = tasks
+    
+    @property
+    def focus_task(self):
+        """Get user's focus task for overwhelmed days."""
+        return self.context.get('focus_task')
+    
+    @focus_task.setter
+    def focus_task(self, task):
+        """Set user's focus task."""
+        self.context['focus_task'] = task
+    
+    @property
+    def task_breakdown(self):
+        """Get breakdown steps for focus task."""
+        return self.context.get('task_breakdown', [])
+    
+    @task_breakdown.setter
+    def task_breakdown(self, steps):
+        """Set breakdown steps for focus task."""
+        self.context['task_breakdown'] = steps
+    
+    @property
+    def is_self_care_day(self):
+        """Check if user is having a self-care day."""
+        return self.context.get('self_care_day', False)
+    
+    @is_self_care_day.setter
+    def is_self_care_day(self, value):
+        """Set self-care day status."""
+        self.context['self_care_day'] = value
+    
+    def get_tasks_for_day(self, day):
+        """Get tasks for a specific day from weekly plan."""
+        return self.context.get('weekly_tasks', {}).get(day, [])
+    
+    def set_tasks_for_day(self, day, tasks):
+        """Set tasks for a specific day in weekly plan."""
+        if 'weekly_tasks' not in self.context:
+            self.context['weekly_tasks'] = {}
+        self.context['weekly_tasks'][day] = tasks
+    
+    def to_dict(self):
+        """Convert user object to dictionary for Firebase storage."""
+        return {
+            'user_id': self.user_id,
+            'name': self.name,
+            'state': self.state,
+            'context': self.context
+        }
+    
+    @classmethod
+    def from_dict(cls, data: dict):
+        """Create a User instance from a dictionary."""
+        if not data:
+            return None
+            
+        user = cls(data.get('user_id'), data.get('name'))
+        user.state = data.get('state', cls.STATE_INITIAL)
+        user.context = data.get('context', {
+            'flow_type': None,
+            'last_check_in': None,
+            'last_task_update': None,
+            'current_tasks': [],
+            'planning_type': None,
+            'emotional_state': None,
+            'energy_level': None,
+            'pending_checkins': [],
+            'current_checkin_source': None,
+            'missed_checkins': [],
+            'weekly_tasks': {},
+            'daily_tasks': [],
+            'focus_task': None,
+            'task_breakdown': [],
+            'self_care_day': False,
+            'last_weekly_planning': None,
+            'daily_checkin_time': None,
+            'midday_checkin_time': None,
+            'endday_checkin_time': None
+        })
+        return user
+        
+    def needs_checkin(self, current_time) -> bool:
+        """
+        Determine if user needs a check-in based on their last check-in time.
+        
+        Args:
+            current_time: Current timestamp to compare against
+            
+        Returns:
+            bool: True if user needs a check-in, False otherwise
+        """
+        if not self.last_checkin:
+            return True
+            
+        # If it's been more than 20 hours since last check-in
+        time_since_last = current_time - self.last_checkin
+        return time_since_last >= (20 * 3600)  # 20 hours in seconds
 
     @staticmethod
     def get_all():

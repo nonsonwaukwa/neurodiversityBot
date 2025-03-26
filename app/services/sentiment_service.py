@@ -4,6 +4,7 @@ import requests
 import random
 import json
 import logging
+import re
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -307,4 +308,65 @@ Return the analysis in this exact JSON format:
             return {
                 'message': response,
                 'planning_type': 'weekly'
-            } 
+            }
+
+    def analyze_daily_checkin(self, text: str) -> dict:
+        """
+        Analyze sentiment for daily check-in responses.
+        
+        Args:
+            text: The user's response text
+            
+        Returns:
+            dict: Analysis results including emotional_state and energy_level
+        """
+        try:
+            logger.info(f"Analyzing daily check-in text: {text}")
+            
+            prompt = (
+                "Analyze the following daily check-in response and determine:\n"
+                "1. The user's emotional state (positive, neutral, or overwhelmed)\n"
+                "2. Their energy level (high, medium, or low)\n"
+                "3. Key emotions expressed\n"
+                "4. Whether they need extra support\n\n"
+                f"Response: {text}\n\n"
+                "Respond in JSON format with these fields:\n"
+                "{\n"
+                '  "emotional_state": "positive/neutral/overwhelmed",\n'
+                '  "energy_level": "high/medium/low",\n'
+                '  "emotions": ["emotion1", "emotion2"],\n'
+                '  "needs_support": true/false\n'
+                "}"
+            )
+            
+            response = self._call_api(prompt)
+            
+            # Clean the response to handle markdown code blocks
+            cleaned_response = self._clean_api_response(response)
+            
+            # Parse the JSON response
+            result = json.loads(cleaned_response)
+            
+            logger.info(f"Sentiment analysis result: {result}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error analyzing daily check-in: {str(e)}")
+            # Default to neutral if analysis fails
+            return {
+                "emotional_state": "neutral",
+                "energy_level": "medium",
+                "emotions": ["unknown"],
+                "needs_support": False
+            }
+            
+    def _clean_api_response(self, response: str) -> str:
+        """Clean the API response by removing markdown code blocks and extra whitespace."""
+        # Remove markdown code blocks
+        response = re.sub(r'```json\s*', '', response)
+        response = re.sub(r'```\s*', '', response)
+        
+        # Remove leading/trailing whitespace
+        response = response.strip()
+        
+        return response 
