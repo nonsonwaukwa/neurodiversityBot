@@ -648,6 +648,9 @@ def handle_daily_checkin(user_id: str, message_text: str, instance_id: str, serv
             )
             return
             
+        # Get user's name
+        name = user.name.split('_')[0] if '_' in user.name else (user.name or "Friend")
+            
         # Analyze sentiment
         analysis = services['sentiment'].analyze_daily_checkin(message_text)
         logger.info(f"Daily check-in analysis for user {user_id}: {analysis}")
@@ -659,20 +662,50 @@ def handle_daily_checkin(user_id: str, message_text: str, instance_id: str, serv
             'last_check_in': int(time.time())
         }
         
-        # Generate appropriate response based on sentiment
-        response = services['sentiment'].generate_daily_response(user, analysis)
+        # Check planning type and get tasks if weekly
+        planning_type = context.get('planning_type', 'daily')
+        if planning_type == 'weekly':
+            # Get today's tasks from weekly plan
+            today = datetime.now().strftime('%A')
+            weekly_tasks = context.get('weekly_tasks', {})
+            today_tasks = weekly_tasks.get(today, [])
+            
+            if today_tasks:
+                task_list = "\n".join([f"{i+1}. {task}" for i, task in enumerate(today_tasks)])
+                response = (
+                    f"That's fantastic, {name}! 🌟 I love your positive energy. Let's make the most out of today!\n\n"
+                    f"Here are your tasks for {today}:\n\n"
+                    f"{task_list}\n\n"
+                    "How would you like to tackle these? We can:\n"
+                    "1. Take them one at a time\n"
+                    "2. Break them down into smaller steps\n"
+                    "3. Focus on the most important ones first"
+                )
+                new_state = 'DAILY_TASK_SELECTION'
+            else:
+                response = (
+                    f"Good to hear you're feeling great, {name}! 🌟\n\n"
+                    f"I notice you don't have any tasks set for {today}. "
+                    "Would you like to plan some tasks for today?"
+                )
+                new_state = 'DAILY_TASK_INPUT'
+        else:
+            # Generate response based on sentiment for daily planning
+            response = services['sentiment'].generate_daily_response(user, analysis)
+            
+            # Update user state based on response content
+            if "plan your tasks" in response.lower():
+                new_state = 'DAILY_TASK_INPUT'
+            elif "self-care" in response.lower():
+                new_state = 'SELF_CARE_DAY'
+            elif "break down" in response.lower():
+                new_state = 'DAILY_TASK_BREAKDOWN'
+            else:
+                new_state = 'DAILY_TASK_SELECTION'
+        
+        # Send response
         services['whatsapp'].send_message(user_id, response)
         
-        # Update user state based on response content
-        if "plan your tasks" in response.lower():
-            new_state = User.STATE_DAILY_TASK_INPUT
-        elif "self-care" in response.lower():
-            new_state = User.STATE_SELF_CARE_DAY
-        elif "break down" in response.lower():
-            new_state = User.STATE_DAILY_TASK_BREAKDOWN
-        else:
-            new_state = User.STATE_DAILY_TASK_SELECTION
-            
         # Update user state
         services['task'].update_user_state(
             user_id, new_state, instance_id, context_updates

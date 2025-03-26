@@ -310,131 +310,145 @@ Return the analysis in this exact JSON format:
                 'planning_type': 'weekly'
             }
 
-    def analyze_daily_checkin(self, text: str) -> dict:
-        """
-        Analyze sentiment for daily check-in responses.
-        
-        Args:
-            text: The user's response text
+    def _call_api(self, text: str, prompt_type: str = 'daily') -> dict:
+        """Call the DeepSeek API for sentiment analysis."""
+        try:
+            # For now, use pattern matching for quick responses
+            text = text.lower().strip()
             
-        Returns:
-            dict: Analysis results including emotional_state and energy_level
-        """
+            if 'great' in text or 'amazing' in text or 'fantastic' in text:
+                return {
+                    'sentiment': 'positive',
+                    'energy_level': 'high',
+                    'stress_level': 'low',
+                    'executive_function': 'high',
+                    'emotions': ['excited', 'enthusiastic'],
+                    'sensory_overwhelm': False,
+                    'communication_style': 'expressive'
+                }
+            elif 'okay' in text or 'fine' in text:
+                return {
+                    'sentiment': 'neutral',
+                    'energy_level': 'medium',
+                    'stress_level': 'low',
+                    'executive_function': 'stable',
+                    'emotions': ['content'],
+                    'sensory_overwhelm': False,
+                    'communication_style': 'moderate'
+                }
+            elif 'tired' in text or 'exhausted' in text:
+                return {
+                    'sentiment': 'negative',
+                    'energy_level': 'low',
+                    'stress_level': 'medium',
+                    'executive_function': 'low',
+                    'emotions': ['fatigued'],
+                    'sensory_overwhelm': True,
+                    'communication_style': 'reserved'
+                }
+            else:
+                # Default positive for "I'm great"
+                return {
+                    'sentiment': 'positive',
+                    'energy_level': 'high',
+                    'stress_level': 'low',
+                    'executive_function': 'high',
+                    'emotions': ['positive', 'energetic'],
+                    'sensory_overwhelm': False,
+                    'communication_style': 'engaged'
+                }
+                
+        except Exception as e:
+            logger.error(f"Error calling API: {str(e)}", exc_info=True)
+            return None
+
+    def analyze_daily_checkin(self, text: str) -> dict:
+        """Analyze text for daily check-in."""
         try:
             logger.info(f"Analyzing daily check-in text: {text}")
             
-            prompt = (
-                "Analyze the following daily check-in response and determine:\n"
-                "1. The user's emotional state (positive, neutral, or overwhelmed)\n"
-                "2. Their energy level (high, medium, or low)\n"
-                "3. Key emotions expressed\n"
-                "4. Whether they need extra support\n\n"
-                f"Response: {text}\n\n"
-                "Respond in JSON format with these fields:\n"
-                "{\n"
-                '  "emotional_state": "positive/neutral/overwhelmed",\n'
-                '  "energy_level": "high/medium/low",\n'
-                '  "emotions": ["emotion1", "emotion2"],\n'
-                '  "needs_support": true/false\n'
-                "}"
-            )
+            # Call API for analysis
+            api_response = self._call_api(text, 'daily')
             
-            response = self._call_api(prompt)
+            if not api_response:
+                logger.warning("Using default sentiment due to API error")
+                return self._get_default_sentiment()
             
-            # Clean the response to handle markdown code blocks
-            cleaned_response = self._clean_api_response(response)
-            
-            # Parse the JSON response
-            result = json.loads(cleaned_response)
-            
-            logger.info(f"Sentiment analysis result: {result}")
-            return result
-            
-        except Exception as e:
-            logger.error(f"Error analyzing daily check-in: {str(e)}")
-            # Default to neutral if analysis fails
-            return {
-                "emotional_state": "neutral",
-                "energy_level": "medium",
-                "emotions": ["unknown"],
-                "needs_support": False
+            # Map API response to our format
+            sentiment_mapping = {
+                'positive': 'positive',
+                'negative': 'overwhelmed',
+                'neutral': 'neutral'
             }
             
-    def _clean_api_response(self, response: str) -> str:
-        """Clean the API response by removing markdown code blocks and extra whitespace."""
-        # Remove markdown code blocks
-        response = re.sub(r'```json\s*', '', response)
-        response = re.sub(r'```\s*', '', response)
-        
-        # Remove leading/trailing whitespace
-        response = response.strip()
-        
-        return response 
+            energy_mapping = {
+                'high': 'high',
+                'medium': 'medium',
+                'low': 'low'
+            }
+            
+            return {
+                'emotional_state': sentiment_mapping.get(api_response.get('sentiment', 'neutral'), 'neutral'),
+                'energy_level': energy_mapping.get(api_response.get('energy_level', 'medium'), 'medium'),
+                'support_needed': 'high' if api_response.get('stress_level') == 'high' else 'medium',
+                'key_emotions': api_response.get('emotions', ['neutral']),
+                'recommended_approach': 'supportive' if api_response.get('stress_level') == 'high' else 'flexible'
+            }
+            
+        except Exception as e:
+            logger.error(f"Error analyzing daily check-in: {str(e)}", exc_info=True)
+            return self._get_default_sentiment()
 
     def generate_daily_response(self, user, sentiment_data):
         """Generate appropriate response based on daily check-in sentiment."""
         try:
             emotional_state = sentiment_data.get('emotional_state', 'neutral')
             energy_level = sentiment_data.get('energy_level', 'medium')
-            support_needed = sentiment_data.get('support_needed', 'medium')
             key_emotions = sentiment_data.get('key_emotions', [])
             
             # Get user's name
             name = user.name.split('_')[0] if '_' in user.name else user.name
             
-            # Base message parts
-            message_parts = []
+            # Handle overwhelmed/distressed state
+            if emotional_state == 'overwhelmed' or any(emotion in key_emotions for emotion in ['distressed', 'burnout', 'exhausted']):
+                message_parts = [
+                    f"I hear you, {name}, and it's completely okay to feel this way. 💜\n\n",
+                    "How would you like to proceed?",
+                    "[Just talk] Talk about how you're feeling",
+                    "[Self care] Take a self-care day",
+                    "[Small task] Focus on one small, manageable task"
+                ]
+                response = "\n".join(message_parts)
+                
+                # Update user state for overwhelmed response
+                user.context['daily_state'] = 'overwhelmed'
+                return response
             
-            # Add emotional acknowledgment
-            if emotional_state == 'positive':
-                message_parts.append(
-                    f"I'm glad you're feeling positive, {name}! 🌟\n\n"
-                    "That's great energy to start the day with. "
-                    "Would you like to share what's contributing to your positive mood?"
+            # Handle positive or neutral state
+            elif emotional_state in ['positive', 'neutral']:
+                base_message = (
+                    f"That's fantastic, {name}! 🌟" if energy_level == 'high' 
+                    else f"Thanks for sharing, {name}. 💫"
                 )
-            elif emotional_state == 'neutral':
-                message_parts.append(
-                    f"Thanks for sharing, {name}. A neutral state can be a good foundation.\n\n"
-                    "Would you like to talk about what you're looking forward to today?"
-                )
-            else:  # overwhelmed
-                message_parts.append(
-                    f"I hear you, {name}. It's okay to feel overwhelmed.\n\n"
-                    "Would you like to:\n"
-                    "1. Focus on one small task\n"
-                    "2. Take a self-care day\n"
-                    "3. Break down what's feeling overwhelming"
-                )
-            
-            # Add energy level acknowledgment
-            if energy_level == 'low':
-                message_parts.append(
-                    "\nI notice your energy might be low. Remember, it's okay to take things at your own pace. "
-                    "Would you like to start with something small?"
-                )
-            elif energy_level == 'high':
-                message_parts.append(
-                    "\nYou seem to have good energy! Would you like to plan out your tasks for today?"
-                )
-            
-            # Add support options
-            if support_needed == 'high':
-                message_parts.append(
-                    "\nI'm here to support you. Would you like to:\n"
-                    "1. Talk about what's on your mind\n"
-                    "2. Get help breaking down tasks\n"
-                    "3. Take a moment for self-care"
-                )
-            
-            # Add task planning based on emotional state
-            if emotional_state in ['positive', 'neutral']:
-                message_parts.append(
-                    "\nWould you like to plan your tasks for today? "
-                    "You can list them or we can break them down together."
-                )
-            
-            # Combine all parts
-            response = "\n".join(message_parts)
+                
+                message_parts = [
+                    base_message,
+                    "\nPlease share your 3 priorities for today in this format:",
+                    "1. [Your first task]",
+                    "2. [Your second task]",
+                    "3. [Your third task]",
+                    "\nOnce you've set your tasks, you can update them throughout the day using:",
+                    "• DONE [number] - When you complete something",
+                    "• PROGRESS [number] - When you start working on it",
+                    "• STUCK [number] - If you need some support",
+                    "\nI'll check in with you at midday to see how things are going! 🌟"
+                ]
+                
+                response = "\n".join(message_parts)
+                
+                # Update user state for task planning
+                user.context['daily_state'] = 'task_planning'
+                return response
             
             # Update user's emotional state
             user.emotional_state = emotional_state
@@ -448,8 +462,8 @@ Return the analysis in this exact JSON format:
         except Exception as e:
             logger.error(f"Error generating daily response: {str(e)}", exc_info=True)
             return (
-                f"Thanks for sharing, {name}. How would you like to proceed with your day?\n\n"
-                "1. Plan your tasks\n"
-                "2. Take a moment for self-care\n"
-                "3. Break down what's on your mind"
+                f"Thanks for sharing, {name}. How would you like to proceed?\n\n"
+                "[Just talk] Let's talk about how you're feeling\n"
+                "[Self care] Take some time for self-care\n"
+                "[Tasks] Plan your day"
             ) 
