@@ -255,31 +255,32 @@ class User:
         """Get the user's sentiment data from last week"""
         return self.last_week_sentiment
 
-    def update_user_state(self, new_state: str = None, force_timestamp_update: bool = False):
-        """Update the user's state and last_state_update timestamp using a transaction."""
-        @firestore.transactional
-        def update_state_in_transaction(transaction, user_ref):
-            snapshot = user_ref.get(transaction=transaction)
-            if not snapshot.exists:
-                return
+    def update_user_state(self, new_state: str):
+        """Update user state and record the timestamp of the update."""
+        try:
+            from firebase_admin import firestore
+            db = firestore.client()
             
-            update_data = {}
-            if new_state is not None:
-                self.state = new_state
-                update_data['state'] = new_state
+            # Get the instance collection based on account_index
+            instance_id = f'instance{self.account_index}'
+            user_ref = db.collection('instances').document(instance_id).collection('users').document(self.user_id)
             
-            if new_state is not None or force_timestamp_update:
-                current_time = int(time.time())
-                self.last_state_update = current_time
-                update_data['last_state_update'] = current_time
+            # Update state and timestamp
+            current_time = int(datetime.now().timestamp())
+            user_ref.update({
+                'state': new_state,
+                'last_state_update': current_time
+            })
             
-            if update_data:
-                transaction.update(user_ref, update_data)
-        
-        # Start transaction
-        transaction = db.transaction()
-        user_ref = db.collection('instances').document(f'instance{self.account_index}').collection('users').document(self.user_id)
-        update_state_in_transaction(transaction, user_ref)
+            # Update local object
+            self.state = new_state
+            self.last_state_update = current_time
+            
+            logger.info(f"Updated state for user {self.user_id} to {new_state}")
+            return True
+        except Exception as e:
+            logger.error(f"Failed to update state for user {self.user_id}: {str(e)}")
+            return False
 
     def update_planning_schedule(self, schedule):
         """Update the user's planning schedule"""

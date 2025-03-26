@@ -10,8 +10,9 @@ from app.models.user import User
 from app.models.checkin import CheckIn
 from app.services.whatsapp_service import get_whatsapp_service
 from app.services.sentiment_service import SentimentService
+from app.services.firebase import db
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # Set up logging
 logging.basicConfig(
@@ -22,93 +23,127 @@ logger = logging.getLogger(__name__)
 sentiment_service = SentimentService()
 
 def send_weekly_checkin():
-    """Send weekly check-in messages to all users to determine their planning schedule"""
+    """Send weekly check-in messages to all users"""
     logger.info("Running weekly check-in cron job")
     
-    users = User.get_all()
+    # Get users from all instances
+    users = []
+    for instance_id in ['instance1', 'instance2']:  # Add more instances as needed
+        try:
+            users_ref = db.collection('instances').document(instance_id).collection('users')
+            instance_users = users_ref.stream()
+            
+            for user_doc in instance_users:
+                try:
+                    user_data = user_doc.to_dict()
+                    if not user_data:
+                        logger.warning(f"No data found for user {user_doc.id} in {instance_id}")
+                        continue
+                        
+                    account_index = int(instance_id.replace('instance', ''))
+                    
+                    # Create user object
+                    user = User(
+                        user_id=user_doc.id,
+                        name=user_data.get('name', ''),
+                        account_index=account_index
+                    )
+                    
+                    # Set user properties from data
+                    user.state = user_data.get('state')
+                    user.planning_type = user_data.get('planning_schedule', 'daily')
+                    user.context['weekly_tasks'] = user_data.get('weekly_tasks', {})
+                    user.last_checkin = user_data.get('last_check_in')
+                    user.last_weekly_checkin = user_data.get('last_weekly_checkin')
+                    user.last_week_sentiment = user_data.get('last_week_sentiment')
+                    
+                    users.append(user)
+                    logger.info(f"Loaded user {user_doc.id} from {instance_id}")
+                    
+                except Exception as e:
+                    logger.error(f"Error loading user {user_doc.id} from {instance_id}: {str(e)}", exc_info=True)
+                    continue
+                    
+        except Exception as e:
+            logger.error(f"Error accessing instance {instance_id}: {str(e)}", exc_info=True)
+            continue
     
     if not users:
         logger.info("No users found for weekly check-in")
         return
     
+    logger.info(f"Found {len(users)} users for weekly check-in")
+    
     # Group users by account
     users_by_account = {}
     for user in users:
-        account_index = user.account_index
-        if account_index not in users_by_account:
-            users_by_account[account_index] = []
-        users_by_account[account_index].append(user)
+        if user.account_index not in users_by_account:
+            users_by_account[user.account_index] = []
+        users_by_account[user.account_index].append(user)
+    
+    logger.info(f"Processing users across {len(users_by_account)} accounts")
     
     # Process each account
     for account_index, account_users in users_by_account.items():
         instance_id = f'instance{account_index}'
         whatsapp_service = get_whatsapp_service(instance_id)
         
+        logger.info(f"Processing {len(account_users)} users for account {account_index}")
+        
         for user in account_users:
             try:
                 name = user.name.split('_')[0] if '_' in user.name else user.name
+                logger.info(f"Processing user {user.user_id} ({name})")
                 
-                # Get user's last week's sentiment data and tasks
-                last_week_sentiment = user.get_last_week_sentiment()
-                weekly_tasks = user.weekly_tasks
+                # Check if user needs weekly check-in
+                current_time = int(datetime.now().timestamp())
+                last_weekly = user.last_weekly_checkin
                 
-                # Build a personalized message
-                message_parts = []
-                
-                # Add task-related reflection if they had weekly tasks
-                if weekly_tasks:
-                    completed_tasks = [task for task in weekly_tasks if task.get('status') == 'completed']
-                    if completed_tasks:
-                        message_parts.append(
-                            "Looking back at last week, you made progress on some of your goals - "
-                            "that's worth celebrating! Even small steps forward count. 🌟"
+                if last_weekly:
+                    last_weekly_date = datetime.fromtimestamp(last_weekly).date()
+                    days_since_last = (datetime.now().date() - last_weekly_date).days
+                    
+                    if days_since_last < 7:
+                        logger.info(
+                            f"User {user.user_id} last weekly check-in was {days_since_last} days ago. "
+                            "Skipping weekly check-in."
                         )
-                    else:
-                        message_parts.append(
-                            "I noticed last week might have been challenging with the tasks we set. "
-                            "That's completely okay - some weeks are harder than others. 💙"
-                        )
+                        continue
                 
-                # Add main check-in message
-                message_parts.append(
-                    "How are you feeling about the week ahead? You can share anything - "
-                    "your energy levels, any concerns, or what you're looking forward to. "
-                    "This helps me understand how to best support you. 💭"
-                )
-                
-                # Add context based on last week's state
-                if last_week_sentiment and last_week_sentiment.get('stress_level') == 'high':
-                    message_parts.append(
-                        "I know last week felt pretty heavy. Remember, it's okay if you need to take things "
-                        "slower or focus more on self-care. We'll figure out what feels manageable together. 💝"
-                    )
+                # Build personalized message
+                message_parts = [
+                    f"Hi {name}! 🌟\n\n",
+                    "It's time for our weekly check-in! How has your week been? "
+                    "Take a moment to reflect on:\n\n",
+                    "• Your achievements and progress\n",
+                    "• Any challenges you faced\n",
+                    "• How you're feeling overall\n\n",
+                    "Share your thoughts with me, and I'll help you plan for the week ahead. 💭"
+                ]
                 
                 # Combine all parts
-                checkin_message = (
-                    f"Happy Sunday, {name}! 🌅\n\n" +
-                    "\n\n".join(message_parts) +
-                    "\n\nYou can send a voice note or text - whatever feels easier to express yourself with. "
-                    "Based on how you're feeling, we'll find the right approach for the week ahead. 🌱"
-                )
+                checkin_message = "".join(message_parts)
                 
                 logger.info(f"Sending weekly check-in to user {user.user_id}")
                 response = whatsapp_service.send_message(user.user_id, checkin_message)
                 
-                # Store this message as a check-in and update user state
-                CheckIn.create(user.user_id, checkin_message, CheckIn.TYPE_WEEKLY)
-                user.update_user_state('WEEKLY_REFLECTION')
-                
                 if response:
+                    # Store this message as a check-in and update user state
+                    CheckIn.create(user.user_id, checkin_message, CheckIn.TYPE_WEEKLY)
+                    user.update_user_state(User.STATE_WEEKLY_REFLECTION)
                     logger.info(f"Successfully sent weekly check-in to user {user.user_id}")
                 else:
                     logger.error(f"Failed to send weekly check-in to user {user.user_id}")
                     
             except Exception as e:
-                logger.error(f"Error sending weekly check-in to user {user.user_id}: {e}")
+                logger.error(
+                    f"Error sending weekly check-in to user {user.user_id}: {str(e)}",
+                    exc_info=True
+                )
 
 if __name__ == "__main__":
     try:
         send_weekly_checkin()
     except Exception as e:
-        logger.error(f"Failed to run weekly check-in: {e}")
+        logger.error("Failed to run weekly check-in", exc_info=True)
         raise 

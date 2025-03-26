@@ -106,13 +106,25 @@ def send_morning_checkin():
                         )
                         continue
                 
-                # If user is in weekly reflection, don't interrupt
+                # If user is in weekly reflection, check how long they've been in this state
                 if user.state == User.STATE_WEEKLY_REFLECTION:
-                    logger.info(
-                        f"User {user.user_id} is in weekly reflection state - "
-                        "skipping daily check-in"
-                    )
-                    continue
+                    last_state_update = user_data.get('last_state_update')
+                    current_time = int(datetime.now().timestamp())
+                    
+                    # If last state update was more than 8 hours ago or doesn't exist,
+                    # consider the state as stale
+                    if not last_state_update or (current_time - last_state_update) > 21600:
+                        logger.info(
+                            f"User {user.user_id} has a stale weekly reflection state "
+                            f"(Last update: {last_state_update if last_state_update else 'Never'}). "
+                            "Proceeding with daily check-in."
+                        )
+                    else:
+                        logger.info(
+                            f"User {user.user_id} is in active weekly reflection state - "
+                            "skipping daily check-in"
+                        )
+                        continue
                 
                 # Build personalized message
                 message_parts = [
