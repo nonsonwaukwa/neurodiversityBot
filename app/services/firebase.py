@@ -1,29 +1,24 @@
-import os
 import firebase_admin
 from firebase_admin import credentials, firestore
-from pathlib import Path
+import os
+import json
 
-# Get the absolute path to the project root
-project_root = Path(__file__).parent.parent.parent
-
-# Get Firebase credentials path from environment variable
-cred_path = os.getenv('FIREBASE_CREDENTIALS')
-if not cred_path:
-    raise ValueError("FIREBASE_CREDENTIALS environment variable is not set")
-
-# Convert relative path to absolute path if needed
-if not os.path.isabs(cred_path):
-    cred_path = os.path.join(project_root, cred_path)
-
-if not os.path.exists(cred_path):
-    raise ValueError(f"Firebase credentials file not found at: {cred_path}")
-
-try:
-    # Initialize Firebase Admin SDK
-    cred = credentials.Certificate(cred_path)
-    firebase_admin.initialize_app(cred)
+# Initialize Firebase Admin SDK
+if not firebase_admin._apps:
+    # Get credentials from environment variable
+    cred_json = os.getenv('FIREBASE_CREDENTIALS_JSON')
+    if not cred_json:
+        raise ValueError("FIREBASE_CREDENTIALS_JSON environment variable is not set")
     
-    # Get Firestore client
-    db = firestore.client()
-except Exception as e:
-    raise ValueError(f"Failed to initialize Firebase: {str(e)}") 
+    # Parse the JSON string into a dictionary
+    try:
+        cred_dict = json.loads(cred_json)
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON in FIREBASE_CREDENTIALS_JSON: {str(e)}")
+    
+    # Initialize Firebase with the credentials
+    cred = credentials.Certificate(cred_dict)
+    firebase_admin.initialize_app(cred)
+
+# Get Firestore database instance
+db = firestore.client() 
