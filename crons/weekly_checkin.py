@@ -100,15 +100,25 @@ def send_weekly_checkin():
                 last_weekly = user.last_weekly_checkin
                 
                 if last_weekly:
-                    last_weekly_date = datetime.fromtimestamp(last_weekly).date()
-                    days_since_last = (datetime.now().date() - last_weekly_date).days
-                    
-                    if days_since_last < 7:
-                        logger.info(
-                            f"User {user.user_id} last weekly check-in was {days_since_last} days ago. "
-                            "Skipping weekly check-in."
+                    try:
+                        # Convert string to int if needed
+                        if isinstance(last_weekly, str):
+                            last_weekly = int(last_weekly)
+                            
+                        last_weekly_date = datetime.fromtimestamp(last_weekly).date()
+                        days_since_last = (datetime.now().date() - last_weekly_date).days
+                        
+                        if days_since_last < 7:
+                            logger.info(
+                                f"User {user.user_id} last weekly check-in was {days_since_last} days ago. "
+                                "Skipping weekly check-in."
+                            )
+                            continue
+                    except (ValueError, TypeError) as e:
+                        logger.warning(
+                            f"Invalid timestamp for user {user.user_id}: {last_weekly}. "
+                            "Proceeding with check-in."
                         )
-                        continue
                 
                 # Build personalized message
                 message_parts = [

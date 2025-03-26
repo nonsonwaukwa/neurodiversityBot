@@ -2,6 +2,11 @@ from datetime import datetime, timedelta, timezone
 import time
 from app.services.firebase import db
 from firebase_admin import firestore
+import logging
+from typing import Optional, Dict, List, Any
+
+# Set up logging
+logger = logging.getLogger(__name__)
 
 class User:
     # Planning Types
