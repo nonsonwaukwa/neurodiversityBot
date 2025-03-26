@@ -370,3 +370,86 @@ Return the analysis in this exact JSON format:
         response = response.strip()
         
         return response 
+
+    def generate_daily_response(self, user, sentiment_data):
+        """Generate appropriate response based on daily check-in sentiment."""
+        try:
+            emotional_state = sentiment_data.get('emotional_state', 'neutral')
+            energy_level = sentiment_data.get('energy_level', 'medium')
+            support_needed = sentiment_data.get('support_needed', 'medium')
+            key_emotions = sentiment_data.get('key_emotions', [])
+            
+            # Get user's name
+            name = user.name.split('_')[0] if '_' in user.name else user.name
+            
+            # Base message parts
+            message_parts = []
+            
+            # Add emotional acknowledgment
+            if emotional_state == 'positive':
+                message_parts.append(
+                    f"I'm glad you're feeling positive, {name}! 🌟\n\n"
+                    "That's great energy to start the day with. "
+                    "Would you like to share what's contributing to your positive mood?"
+                )
+            elif emotional_state == 'neutral':
+                message_parts.append(
+                    f"Thanks for sharing, {name}. A neutral state can be a good foundation.\n\n"
+                    "Would you like to talk about what you're looking forward to today?"
+                )
+            else:  # overwhelmed
+                message_parts.append(
+                    f"I hear you, {name}. It's okay to feel overwhelmed.\n\n"
+                    "Would you like to:\n"
+                    "1. Focus on one small task\n"
+                    "2. Take a self-care day\n"
+                    "3. Break down what's feeling overwhelming"
+                )
+            
+            # Add energy level acknowledgment
+            if energy_level == 'low':
+                message_parts.append(
+                    "\nI notice your energy might be low. Remember, it's okay to take things at your own pace. "
+                    "Would you like to start with something small?"
+                )
+            elif energy_level == 'high':
+                message_parts.append(
+                    "\nYou seem to have good energy! Would you like to plan out your tasks for today?"
+                )
+            
+            # Add support options
+            if support_needed == 'high':
+                message_parts.append(
+                    "\nI'm here to support you. Would you like to:\n"
+                    "1. Talk about what's on your mind\n"
+                    "2. Get help breaking down tasks\n"
+                    "3. Take a moment for self-care"
+                )
+            
+            # Add task planning based on emotional state
+            if emotional_state in ['positive', 'neutral']:
+                message_parts.append(
+                    "\nWould you like to plan your tasks for today? "
+                    "You can list them or we can break them down together."
+                )
+            
+            # Combine all parts
+            response = "\n".join(message_parts)
+            
+            # Update user's emotional state
+            user.emotional_state = emotional_state
+            user.energy_level = energy_level
+            
+            # Store sentiment data
+            user.context['last_sentiment'] = sentiment_data
+            
+            return response
+            
+        except Exception as e:
+            logger.error(f"Error generating daily response: {str(e)}", exc_info=True)
+            return (
+                f"Thanks for sharing, {name}. How would you like to proceed with your day?\n\n"
+                "1. Plan your tasks\n"
+                "2. Take a moment for self-care\n"
+                "3. Break down what's on your mind"
+            ) 

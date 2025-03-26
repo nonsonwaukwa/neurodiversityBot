@@ -761,4 +761,32 @@ def handle_check_in(user_id: str, message_text: str, instance_id: str, services:
         return (
             f"Here's where things stand:\n\n{task_list}\n\n"
             f"You've completed {completed}/{len(tasks)} tasks - that's progress to be proud of! How are you feeling about the rest? Anything I can help with?"
-        ) 
+        )
+
+def _process_daily_checkin(self, user, message_text):
+    """Process daily check-in response."""
+    try:
+        # Analyze sentiment
+        sentiment_data = sentiment_service.analyze_daily_checkin(message_text)
+        logger.info(f"Sentiment analysis for user {user.user_id}: {sentiment_data}")
+        
+        # Generate response based on sentiment
+        response = sentiment_service.generate_daily_response(user, sentiment_data)
+        
+        # Send response
+        whatsapp_service = get_whatsapp_service(f'instance{user.account_index}')
+        whatsapp_service.send_message(user.user_id, response)
+        
+        # Update user state based on response
+        if "plan your tasks" in response.lower():
+            user.update_user_state(User.STATE_DAILY_TASK_INPUT)
+        elif "self-care" in response.lower():
+            user.update_user_state(User.STATE_SELF_CARE_DAY)
+        elif "break down" in response.lower():
+            user.update_user_state(User.STATE_DAILY_TASK_BREAKDOWN)
+        
+        return True
+        
+    except Exception as e:
+        logger.error(f"Error processing daily check-in: {str(e)}", exc_info=True)
+        return False 
