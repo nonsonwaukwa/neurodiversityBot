@@ -637,7 +637,7 @@ def handle_weekly_task_input(user_id: str, message_text: str, instance_id: str, 
             "And so on..."
         )
 
-async def handle_daily_checkin(self, user_id: str, message_text: str, instance_id: str) -> str:
+def handle_daily_checkin(user_id: str, message_text: str, instance_id: str, services: dict, context: dict):
     """Handle the daily check-in flow."""
     try:
         # Get sentiment analysis
@@ -658,7 +658,7 @@ async def handle_daily_checkin(self, user_id: str, message_text: str, instance_i
         
         # Get user's current state to check planning type
         user_state = services['task'].get_user_state(user_id, instance_id)
-        planning_type = user_state['context'].get('planning_type')
+        planning_type = user_state.get('context', {}).get('planning_type')
         logger.info(f"Planning type for user {user_id}: {planning_type}")
         
         # Get today's day name
@@ -675,7 +675,26 @@ async def handle_daily_checkin(self, user_id: str, message_text: str, instance_i
         
         # Generate response based on emotional state and tasks
         if analysis.get('emotional_state') in ['overwhelmed', 'burnt_out', 'distressed']:
-            response = self._generate_support_response()
+            response = (
+                "I hear you, and it's completely okay to feel this way. 💜\n\n"
+                "How would you like to proceed?\n\n"
+                "1. Just talk about how you're feeling\n"
+                "2. Take a self-care day\n"
+                "3. Focus on one small task"
+            )
+            try:
+                services['whatsapp'].send_interactive_buttons(
+                    user_id,
+                    "I hear you, and it's completely okay to feel this way. 💜\n\nHow would you like to proceed?",
+                    [
+                        {"id": "just_talk", "title": "Talk about feelings"},
+                        {"id": "self_care", "title": "Take a self-care day"},
+                        {"id": "small_task", "title": "Focus on one small task"}
+                    ]
+                )
+            except Exception as e:
+                logger.error(f"Failed to send interactive buttons: {e}")
+                services['whatsapp'].send_message(user_id, response)
         else:
             if tasks:
                 task_list = "\n".join([f"• {task['task']}" for task in tasks])
@@ -685,17 +704,19 @@ async def handle_daily_checkin(self, user_id: str, message_text: str, instance_i
                     response = f"I see you're on a weekly plan but I don't see any tasks set for {today}. Would you like to plan some tasks for today?"
                 else:
                     response = "Great! Since you're feeling positive, what are three things you'd like to accomplish today?"
+            services['whatsapp'].send_message(user_id, response)
         
         # Update state for next interaction
         next_state = services['task'].STATES['DAILY_TASK_INPUT']
         services['task'].update_user_state(user_id, next_state, instance_id)
         logger.info(f"Updated user {user_id} state to {next_state}")
         
-        return response
-        
     except Exception as e:
         logger.error(f"Error in handle_daily_checkin: {e}", exc_info=True)
-        raise
+        services['whatsapp'].send_message(
+            user_id,
+            "I encountered an error processing your message. Let me help you get back on track with your tasks."
+        )
 
 # For backward compatibility, redirect instance-specific routes to the main webhook
 @bp.route('/<instance_id>', methods=['GET'])
