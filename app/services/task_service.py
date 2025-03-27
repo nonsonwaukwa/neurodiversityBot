@@ -526,19 +526,9 @@ class TaskService:
             raise 
 
     def store_weekly_tasks(self, user_id: str, tasks_by_day: dict, instance_id: str) -> None:
-        """Store weekly tasks for a user.
-        
-        Args:
-            user_id (str): The user's ID
-            tasks_by_day (dict): Dictionary mapping days to lists of tasks
-            instance_id (str): The instance ID
-        """
+        """Store weekly tasks for a user."""
         try:
-            # Get user document reference
-            user_ref = self.db.collection('users').document(user_id)
-            
-            # Create weekly tasks document with timestamp
-            weekly_tasks_ref = user_ref.collection('weekly_tasks').document()
+            logger.info(f"[STORE_WEEKLY] Starting to store weekly tasks for user {user_id}")
             
             # Format tasks with status
             formatted_tasks = {}
@@ -552,7 +542,12 @@ class TaskService:
                     for task in tasks
                 ]
             
-            # Store the tasks
+            logger.info(f"[STORE_WEEKLY] Formatted tasks: {formatted_tasks}")
+            
+            # Store in unified collection
+            logger.info(f"[STORE_WEEKLY] Storing in unified collection /users/{user_id}/weekly_tasks/")
+            user_ref = self.db.collection('users').document(user_id)
+            weekly_tasks_ref = user_ref.collection('weekly_tasks').document()
             weekly_tasks_ref.set({
                 'tasks': formatted_tasks,
                 'created_at': int(time.time()),
@@ -560,11 +555,22 @@ class TaskService:
                 'instance_id': instance_id,
                 'status': 'active'
             })
+            logger.info(f"[STORE_WEEKLY] Successfully stored in unified collection")
             
-            logger.info(f"Stored weekly tasks for user {user_id}")
+            # Also store in instance-specific collection
+            logger.info(f"[STORE_WEEKLY] Storing in instance collection /instances/{instance_id}/users/{user_id}")
+            instance_user_ref = self.db.collection('instances').document(instance_id).collection('users').document(user_id)
+            instance_user_ref.update({
+                'weekly_tasks': formatted_tasks,
+                'last_weekly_planning': int(time.time()),
+                'planning_type': 'weekly'
+            })
+            logger.info(f"[STORE_WEEKLY] Successfully stored in instance collection")
+            
+            logger.info(f"[STORE_WEEKLY] Completed storing weekly tasks for user {user_id}")
             
         except Exception as e:
-            logger.error(f"Error storing weekly tasks for user {user_id}: {e}")
+            logger.error(f"[STORE_WEEKLY] Error storing weekly tasks for user {user_id}: {e}", exc_info=True)
             raise
 
     def _get_week_start_timestamp(self) -> int:
@@ -572,4 +578,63 @@ class TaskService:
         today = datetime.now()
         monday = today - timedelta(days=today.weekday())
         monday = monday.replace(hour=0, minute=0, second=0, microsecond=0)
-        return int(monday.timestamp()) 
+        return int(monday.timestamp())
+
+    def get_weekly_tasks(self, user_id: str, instance_id: str, day: str) -> List[Dict[str, Any]]:
+        """Get the user's tasks for a specific day from their weekly plan."""
+        try:
+            logger.info(f"[GET_WEEKLY] Starting to retrieve tasks for user {user_id} for {day}")
+            
+            if not self.use_firestore:
+                logger.warning("[GET_WEEKLY] Firestore not available")
+                return []
+                
+            # First try instance-specific collection
+            logger.info(f"[GET_WEEKLY] Trying instance collection first: /instances/{instance_id}/users/{user_id}")
+            instance_user_ref = self.db.collection('instances').document(instance_id).collection('users').document(user_id)
+            user_doc = instance_user_ref.get()
+            
+            if user_doc.exists:
+                user_data = user_doc.to_dict()
+                weekly_tasks = user_data.get('weekly_tasks', {})
+                tasks = weekly_tasks.get(day, [])
+                if tasks:
+                    logger.info(f"[GET_WEEKLY] Found {len(tasks)} tasks in instance collection: {tasks}")
+                    return tasks
+                logger.info("[GET_WEEKLY] No tasks found in instance collection")
+            else:
+                logger.info("[GET_WEEKLY] User document not found in instance collection")
+            
+            # If no tasks found, try unified collection
+            logger.info(f"[GET_WEEKLY] Trying unified collection: /users/{user_id}/weekly_tasks")
+            user_ref = self.db.collection('users').document(user_id)
+            weekly_tasks_ref = user_ref.collection('weekly_tasks')
+            query = weekly_tasks_ref.where('status', '==', 'active').order_by('created_at', direction=firestore.Query.DESCENDING).limit(1)
+            
+            docs = query.get()
+            if not docs:
+                logger.info(f"[GET_WEEKLY] No active weekly plan found in unified collection")
+                return []
+                
+            # Get the tasks for the specified day
+            weekly_plan = docs[0].to_dict()
+            tasks = weekly_plan.get('tasks', {}).get(day, [])
+            logger.info(f"[GET_WEEKLY] Found tasks in unified collection: {tasks}")
+            
+            # If tasks found in unified but not in instance collection,
+            # update the instance collection
+            if tasks and not user_doc.exists:
+                logger.info("[GET_WEEKLY] Syncing tasks from unified to instance collection")
+                instance_user_ref.update({
+                    'weekly_tasks': weekly_plan.get('tasks', {}),
+                    'last_weekly_planning': weekly_plan.get('created_at'),
+                    'planning_type': 'weekly'
+                })
+                logger.info("[GET_WEEKLY] Successfully synced tasks to instance collection")
+            
+            logger.info(f"[GET_WEEKLY] Returning {len(tasks)} tasks for {day}")
+            return tasks
+            
+        except Exception as e:
+            logger.error(f"[GET_WEEKLY] Error getting weekly tasks for user {user_id}: {e}", exc_info=True)
+            return [] 
