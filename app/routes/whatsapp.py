@@ -176,7 +176,7 @@ def webhook():
                             continue
                         
                         try:
-                            process_message(user_id, message_text, instance_id, instances[instance_id])
+                            handle_message(user_id, message_text, instance_id, instances[instance_id])
                             mark_message_processed(message_id, instance_id, timestamp)
                             logger.info(f"Successfully processed message {message_id}")
                         except Exception as e:
@@ -222,148 +222,124 @@ def generate_response(user: User, sentiment_data: dict) -> str:
     # Add more response types based on other sentiment patterns
     return None
 
-def process_message(user_id: str, message_text: str, instance_id: str, services: dict):
-    """Process an incoming message from a user."""
-    logger.info(f"Processing message from user {user_id} in instance {instance_id}")
-    logger.info(f"Message text: {message_text}")
-    
+def handle_message(user_id: str, message_text: str, instance_id: str, services: dict):
+    """Handle incoming WhatsApp messages."""
     try:
-        # Start typing indicator before processing
-        services['whatsapp'].start_typing(user_id)
+        logger.info(f"Processing message from user {user_id}: {message_text}")
         
-        # Get user's current state and context
-        user_state_data = services['task'].get_user_state(user_id, instance_id)
-        current_state = user_state_data.get('state')
-        context = user_state_data.get('context', {})
-        logger.info(f"Current user state: {current_state}")
-        logger.info(f"Current context: {context}")
-        
-        # Get pending check-ins
-        pending_checkins = context.get('pending_checkins', [])
-        current_checkin = context.get('current_checkin_source')
-        logger.info(f"Pending check-ins: {pending_checkins}")
-        logger.info(f"Current check-in source: {current_checkin}")
-        
-        # Get or create user
+        # Get user and their current state
         user = User.get_or_create(user_id, instance_id)
         if not user:
             logger.error(f"Failed to get/create user {user_id}")
-            services['whatsapp'].stop_typing(user_id)
             return
-
-        # For interactive messages, pass the entire message object
-        if isinstance(message_text, dict) and message_text.get('type') == 'interactive':
-            if current_state == 'WEEKLY_REFLECTION' or current_state == 'AWAITING_PLANNING_CHOICE':
-                logger.info("Processing interactive response for weekly reflection")
-                handle_weekly_reflection(user_id, message_text, instance_id, services, context)
-                return
-            # Add more interactive message handling for other states as needed
-            return
-
-        # Check for override commands first (these work in any state)
-        command_match = re.match(r'^(DONE|PROGRESS|STUCK)\s+(\d+)$', message_text.upper())
+            
+        current_state = user.state
+        context = user.context or {}
+        planning_type = context.get('planning_type')
+        
+        logger.info(f"User state: {current_state}, Planning type: {planning_type}")
+        
+        # Handle task update commands first
+        command_match = re.match(r'^(DONE|PROGRESS|STUCK)\s+(\d+)$', message_text.strip().upper())
         if command_match:
-            logger.info(f"Detected task command: {command_match.group(0)}")
             response = handle_task_command(user_id, command_match, instance_id, services)
             services['whatsapp'].send_message(user_id, response)
             return
-
-        # Handle based on current state first
-        if current_state == 'WEEKLY_REFLECTION':
-            logger.info("Processing weekly reflection based on state")
-            handle_weekly_reflection(user_id, message_text, instance_id, services, context)
-            return
-        elif current_state == 'WEEKLY_TASK_INPUT':
-            logger.info("Processing weekly task input based on state")
-            handle_weekly_task_input(user_id, message_text, instance_id, services, context)
-            return
-        elif current_state == 'DAILY_CHECK_IN':
-            logger.info("Processing daily check-in based on state")
-            handle_daily_checkin(user_id, message_text, instance_id, services, context)
-            return
-        elif current_state == 'MIDDAY_CHECK_IN':
-            logger.info("Processing midday check-in based on state")
-            handle_midday_checkin(user_id, message_text, instance_id, services, context)
-            return
-        elif current_state == 'END_DAY_CHECK_IN':
-            logger.info("Processing end-day check-in based on state")
-            handle_end_day_checkin(user_id, message_text, instance_id, services, context)
-            return
-
-        # If no active state, check pending check-ins
-        if pending_checkins:
-            # Sort check-ins by time added
-            sorted_checkins = sorted(pending_checkins, key=lambda x: x['added_at'])
-            oldest_checkin = sorted_checkins[0]['type']
-            logger.info(f"Processing oldest pending check-in: {oldest_checkin}")
             
-            # If we're already in a check-in flow, continue with it
-            if current_checkin:
-                checkin_type = current_checkin
-                logger.info(f"Continuing with current check-in: {checkin_type}")
+        # Handle TASKS command
+        if message_text.strip().upper() == 'TASKS':
+            tasks = services['task'].get_daily_tasks(user_id, instance_id)
+            if not tasks:
+                if planning_type == 'weekly':
+                    # Get today's tasks from weekly plan
+                    today = datetime.now().strftime('%A')
+                    tasks = services['task'].get_weekly_tasks(user_id, instance_id, today)
+                    if tasks:
+                        response = f"Here are your tasks for {today}:\n"
+                        for i, task in enumerate(tasks, 1):
+                            # Only show status emojis if it's after the initial check-in
+                            if context.get('initial_tasks_set'):
+                                status = task.get('status', '')
+                                status_emoji = {
+                                    'completed': '✅',
+                                    'in_progress': '🔄',
+                                    'stuck': '❌'
+                                }.get(status, '')
+                                response += f"{i}. {task['task']} {status_emoji}\n"
+                            else:
+                                response += f"{i}. {task['task']}\n"
+                    else:
+                        response = f"You haven't set any tasks for {today} yet."
+                else:
+                    response = "You haven't set any tasks for today yet."
             else:
-                # Start with the oldest pending check-in
-                checkin_type = oldest_checkin
-                logger.info(f"Starting new check-in: {checkin_type}")
-                # Update the current check-in source
-                services['task'].update_user_state(
-                    user_id,
-                    current_state,
-                    instance_id,
-                    {'current_checkin_source': checkin_type}
-                )
-
-            # Handle the check-in based on type
-            if checkin_type == services['task'].CHECK_IN_TYPES['WEEKLY']:
-                logger.info("Handling weekly reflection from pending check-in")
-                handle_weekly_reflection(user_id, message_text, instance_id, services, context)
-                services['task'].resolve_checkin(user_id, checkin_type, instance_id)
-                logger.info("Weekly reflection completed and resolved")
-                
-            elif checkin_type == services['task'].CHECK_IN_TYPES['DAILY']:
-                logger.info("Handling daily check-in from pending check-in")
-                handle_daily_checkin(user_id, message_text, instance_id, services, context)
-                services['task'].resolve_checkin(user_id, checkin_type, instance_id)
-                logger.info("Daily check-in completed and resolved")
-                
-            elif checkin_type == services['task'].CHECK_IN_TYPES['MIDDAY']:
-                logger.info("Handling midday check-in from pending check-in")
-                handle_midday_checkin(user_id, message_text, instance_id, services, context)
-                services['task'].resolve_checkin(user_id, checkin_type, instance_id)
-                logger.info("Midday check-in completed and resolved")
-                
-            elif checkin_type == services['task'].CHECK_IN_TYPES['END_DAY']:
-                logger.info("Handling end-day check-in from pending check-in")
-                handle_end_day_checkin(user_id, message_text, instance_id, services, context)
-                services['task'].resolve_checkin(user_id, checkin_type, instance_id)
-                logger.info("End-day check-in completed and resolved")
-            
-            # Clear current check-in source after handling
-            logger.info("Clearing current check-in source")
-            services['task'].update_user_state(
-                user_id,
-                current_state,
-                instance_id,
-                {'current_checkin_source': None}
-            )
-            
-        else:
-            logger.info("No active state or pending check-ins found")
-            # No pending check-ins or active state, handle as general message
-            response = (
-                "I see you have no pending check-ins at the moment. "
-                "You can always use commands like:\n"
-                "• DONE [number] - Mark a task as completed\n"
-                "• PROGRESS [number] - Update task progress\n"
-                "• STUCK [number] - Get help with a task\n"
-                "• TASKS - See your current tasks"
-            )
+                response = "Here are your current tasks:\n"
+                for i, task in enumerate(tasks, 1):
+                    # Only show status emojis if it's after the initial check-in
+                    if context.get('initial_tasks_set'):
+                        status = task.get('status', '')
+                        status_emoji = {
+                            'completed': '✅',
+                            'in_progress': '🔄',
+                            'stuck': '❌'
+                        }.get(status, '')
+                        response += f"{i}. {task['task']} {status_emoji}\n"
+                    else:
+                        response += f"{i}. {task['task']}\n"
             services['whatsapp'].send_message(user_id, response)
-            
+            return
+        
+        # Handle based on current state and planning type
+        if current_state == 'DAILY_CHECK_IN':
+            handle_daily_checkin(user_id, message_text, instance_id, services, context)
+        elif current_state == 'WEEKLY_REFLECTION':
+            handle_weekly_reflection(user_id, message_text, instance_id, services, context)
+        elif current_state == 'WEEKLY_TASK_INPUT':
+            handle_weekly_task_input(user_id, message_text, instance_id, services, context)
+        else:
+            # Check if it's time for check-in
+            if services['task'].should_send_checkin(user_id, instance_id):
+                if planning_type == 'weekly':
+                    handle_weekly_reflection(user_id, message_text, instance_id, services, context)
+                else:
+                    handle_daily_checkin(user_id, message_text, instance_id, services, context)
+            else:
+                # User is between check-ins, handle based on planning type
+                if planning_type == 'weekly':
+                    today = datetime.now().strftime('%A')
+                    tasks = services['task'].get_weekly_tasks(user_id, instance_id, today)
+                    if tasks:
+                        response = f"Here are your tasks for {today}:\n"
+                        for i, task in enumerate(tasks, 1):
+                            status = task.get('status', '')
+                            status_emoji = {
+                                'completed': '✅',
+                                'in_progress': '🔄',
+                                'stuck': '❌'
+                            }.get(status, '')
+                            response += f"{i}. {task['task']} {status_emoji}\n"
+                        response += "\nI'll check in at midday to see how you're doing! Remember you can:\n"
+                        response += "• Use DONE [number] when you complete a task\n"
+                        response += "• Use PROGRESS [number] when you start a task\n"
+                        response += "• Use STUCK [number] if you need help"
+                    else:
+                        # Trigger weekly reflection if no tasks
+                        handle_weekly_reflection(user_id, message_text, instance_id, services, context)
+                else:
+                    # Trigger daily check-in if no tasks
+                    handle_daily_checkin(user_id, message_text, instance_id, services, context)
+        
     except Exception as e:
-        logger.error(f"Error processing message: {str(e)}")
-        services['whatsapp'].stop_typing(user_id)
-        raise
+        logger.error(f"Error processing message: {str(e)}", exc_info=True)
+        services['whatsapp'].send_message(
+            user_id,
+            "I encountered an error processing your message. Let me help you get back on track with your tasks."
+        )
+        # Trigger appropriate check-in based on planning type
+        if planning_type == 'weekly':
+            handle_weekly_reflection(user_id, message_text, instance_id, services, context)
+        else:
+            handle_daily_checkin(user_id, message_text, instance_id, services, context)
 
 def handle_task_command(user_id: str, command_match: re.Match, instance_id: str, services: dict) -> str:
     """Handle task-related commands (DONE/PROGRESS/STUCK)."""
@@ -655,56 +631,85 @@ def handle_daily_checkin(user_id: str, message_text: str, instance_id: str, serv
         analysis = services['sentiment'].analyze_daily_checkin(message_text)
         logger.info(f"Daily check-in analysis for user {user_id}: {analysis}")
         
+        emotional_state = analysis.get('emotional_state', 'neutral')
+        energy_level = analysis.get('energy_level', 'medium')
+        
         # Update context
         context_updates = {
-            'emotional_state': analysis.get('emotional_state'),
-            'energy_level': analysis.get('energy_level'),
+            'emotional_state': emotional_state,
+            'energy_level': energy_level,
             'last_check_in': int(time.time())
         }
         
-        # Check planning type and get tasks if weekly
-        planning_type = context.get('planning_type', 'daily')
-        if planning_type == 'weekly':
-            # Get today's tasks from weekly plan
-            today = datetime.now().strftime('%A')
-            weekly_tasks = context.get('weekly_tasks', {})
-            today_tasks = weekly_tasks.get(today, [])
-            
-            if today_tasks:
-                task_list = "\n".join([f"{i+1}. {task}" for i, task in enumerate(today_tasks)])
-                response = (
-                    f"That's fantastic, {name}! 🌟 I love your positive energy. Let's make the most out of today!\n\n"
-                    f"Here are your tasks for {today}:\n\n"
-                    f"{task_list}\n\n"
-                    "How would you like to tackle these? We can:\n"
-                    "1. Take them one at a time\n"
-                    "2. Break them down into smaller steps\n"
-                    "3. Focus on the most important ones first"
+        # Check if user is overwhelmed/distressed
+        if emotional_state == 'overwhelmed' or any(emotion in analysis.get('key_emotions', []) for emotion in ['distressed', 'burnout', 'exhausted']):
+            response = (
+                f"I hear you, {name}, and it's completely okay to feel this way. 💜\n\n"
+                "How would you like to proceed?"
+            )
+            # Send interactive buttons for support options
+            try:
+                services['whatsapp'].send_interactive_buttons(
+                    user_id,
+                    response,
+                    [
+                        {"id": "just_talk", "title": "Talk about feelings"},
+                        {"id": "self_care", "title": "Take a self-care day"},
+                        {"id": "small_task", "title": "Focus on one small task"}
+                    ]
                 )
-                new_state = 'DAILY_TASK_SELECTION'
-            else:
+            except Exception as e:
+                logger.error(f"Failed to send interactive buttons: {e}")
+                # Fallback to text response
+                response += "\n[Just talk] Talk about how you're feeling\n"
+                response += "[Self care] Take a self-care day\n"
+                response += "[Small task] Focus on one small task"
+                services['whatsapp'].send_message(user_id, response)
+            new_state = 'AWAITING_SUPPORT_CHOICE'
+            
+        else:  # positive or neutral state
+            # Check planning type and get tasks if weekly
+            planning_type = context.get('planning_type')
+            logger.info(f"Planning type for user {user_id}: {planning_type}")
+            
+            if planning_type == 'weekly':
+                # Get today's tasks from weekly plan
+                today = datetime.now().strftime('%A')
+                tasks = services['task'].get_weekly_tasks(user_id, instance_id, today)
+                
+                if tasks:
+                    task_list = "\n".join([f"{i+1}. {task['task']}" for i, task in enumerate(tasks)])
+                    response = (
+                        f"That's fantastic, {name}! 🌟\n\n"
+                        f"Here are your tasks for {today}:\n"
+                        f"{task_list}\n\n"
+                        "I'll check in with you at midday to see how things are going! Remember you can:\n"
+                        "• Use DONE [number] when you complete a task\n"
+                        "• Use PROGRESS [number] when you start working on it\n"
+                        "• Use STUCK [number] if you need some support"
+                    )
+                    new_state = 'DAILY_TASK_SELECTION'
+                    context_updates['current_tasks'] = tasks
+                else:
+                    response = (
+                        f"Good morning, {name}! 🌟\n\n"
+                        f"I notice you don't have any tasks set for {today}. "
+                        "Would you like to plan some tasks for today?"
+                    )
+                    new_state = 'DAILY_TASK_INPUT'
+            else:  # daily planning
                 response = (
-                    f"Good to hear you're feeling great, {name}! 🌟\n\n"
-                    f"I notice you don't have any tasks set for {today}. "
-                    "Would you like to plan some tasks for today?"
+                    f"That's great to hear, {name}! 🌟\n\n"
+                    "Please share your 3 priorities for today in this format:\n"
+                    "1. [Your first task]\n"
+                    "2. [Your second task]\n"
+                    "3. [Your third task]"
                 )
                 new_state = 'DAILY_TASK_INPUT'
-        else:
-            # Generate response based on sentiment for daily planning
-            response = services['sentiment'].generate_daily_response(user, analysis)
-            
-            # Update user state based on response content
-            if "plan your tasks" in response.lower():
-                new_state = 'DAILY_TASK_INPUT'
-            elif "self-care" in response.lower():
-                new_state = 'SELF_CARE_DAY'
-            elif "break down" in response.lower():
-                new_state = 'DAILY_TASK_BREAKDOWN'
-            else:
-                new_state = 'DAILY_TASK_SELECTION'
         
         # Send response
-        services['whatsapp'].send_message(user_id, response)
+        if new_state != 'AWAITING_SUPPORT_CHOICE':  # Don't send twice for button case
+            services['whatsapp'].send_message(user_id, response)
         
         # Update user state
         services['task'].update_user_state(
