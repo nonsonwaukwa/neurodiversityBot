@@ -310,94 +310,66 @@ Return the analysis in this exact JSON format:
                 'planning_type': 'weekly'
             }
 
-    def _call_api(self, text: str, prompt_type: str = 'daily') -> dict:
-        """Call the DeepSeek API for sentiment analysis."""
-        try:
-            # For now, use pattern matching for quick responses
-            text = text.lower().strip()
-            
-            if 'great' in text or 'amazing' in text or 'fantastic' in text:
-                return {
-                    'sentiment': 'positive',
-                    'energy_level': 'high',
-                    'stress_level': 'low',
-                    'executive_function': 'high',
-                    'emotions': ['excited', 'enthusiastic'],
-                    'sensory_overwhelm': False,
-                    'communication_style': 'expressive'
-                }
-            elif 'okay' in text or 'fine' in text:
-                return {
-                    'sentiment': 'neutral',
-                    'energy_level': 'medium',
-                    'stress_level': 'low',
-                    'executive_function': 'stable',
-                    'emotions': ['content'],
-                    'sensory_overwhelm': False,
-                    'communication_style': 'moderate'
-                }
-            elif 'tired' in text or 'exhausted' in text:
-                return {
-                    'sentiment': 'negative',
-                    'energy_level': 'low',
-                    'stress_level': 'medium',
-                    'executive_function': 'low',
-                    'emotions': ['fatigued'],
-                    'sensory_overwhelm': True,
-                    'communication_style': 'reserved'
-                }
-            else:
-                # Default positive for "I'm great"
-                return {
-                    'sentiment': 'positive',
-                    'energy_level': 'high',
-                    'stress_level': 'low',
-                    'executive_function': 'high',
-                    'emotions': ['positive', 'energetic'],
-                    'sensory_overwhelm': False,
-                    'communication_style': 'engaged'
-                }
-                
-        except Exception as e:
-            logger.error(f"Error calling API: {str(e)}", exc_info=True)
-            return None
-
-    def analyze_daily_checkin(self, text: str) -> dict:
-        """Analyze text for daily check-in."""
+    def analyze_daily_checkin(self, text: str) -> Dict[str, Any]:
+        """Analyze text from daily check-in."""
         try:
             logger.info(f"Analyzing daily check-in text: {text}")
             
-            # Call API for analysis
-            api_response = self._call_api(text, 'daily')
+            # Ensure text is a string
+            if not isinstance(text, str):
+                text = str(text)
             
-            if not api_response:
-                logger.warning("Using default sentiment due to API error")
-                return self._get_default_sentiment()
+            text = text.lower().strip()
             
-            # Map API response to our format
-            sentiment_mapping = {
-                'positive': 'positive',
-                'negative': 'overwhelmed',
-                'neutral': 'neutral'
-            }
+            # Quick pattern matching for common responses
+            if any(word in text for word in ['great', 'good', 'fantastic', 'amazing', 'wonderful']):
+                return {
+                    'emotional_state': 'positive',
+                    'energy_level': 'high',
+                    'planning_type': 'weekly',
+                    'support_needed': 'low',
+                    'key_emotions': ['positive', 'energetic'],
+                    'recommended_approach': 'ambitious'
+                }
+            elif any(word in text for word in ['okay', 'fine', 'alright', 'not bad']):
+                return {
+                    'emotional_state': 'neutral',
+                    'energy_level': 'medium',
+                    'planning_type': 'flexible',
+                    'support_needed': 'medium',
+                    'key_emotions': ['neutral'],
+                    'recommended_approach': 'balanced'
+                }
+            elif any(word in text for word in ['tired', 'exhausted', 'overwhelmed', 'stressed', 'burnt out', 'burnout']):
+                return {
+                    'emotional_state': 'overwhelmed',
+                    'energy_level': 'low',
+                    'planning_type': 'minimal',
+                    'support_needed': 'high',
+                    'key_emotions': ['overwhelmed', 'exhausted'],
+                    'recommended_approach': 'supportive'
+                }
             
-            energy_mapping = {
-                'high': 'high',
-                'medium': 'medium',
-                'low': 'low'
-            }
-            
+            # Default to neutral if no patterns match
             return {
-                'emotional_state': sentiment_mapping.get(api_response.get('sentiment', 'neutral'), 'neutral'),
-                'energy_level': energy_mapping.get(api_response.get('energy_level', 'medium'), 'medium'),
-                'support_needed': 'high' if api_response.get('stress_level') == 'high' else 'medium',
-                'key_emotions': api_response.get('emotions', ['neutral']),
-                'recommended_approach': 'supportive' if api_response.get('stress_level') == 'high' else 'flexible'
+                'emotional_state': 'neutral',
+                'energy_level': 'medium',
+                'planning_type': 'flexible',
+                'support_needed': 'medium',
+                'key_emotions': ['neutral'],
+                'recommended_approach': 'balanced'
             }
             
         except Exception as e:
-            logger.error(f"Error analyzing daily check-in: {str(e)}", exc_info=True)
-            return self._get_default_sentiment()
+            logger.error(f"Error analyzing daily check-in: {str(e)}")
+            return {
+                'emotional_state': 'neutral',
+                'energy_level': 'medium',
+                'planning_type': 'daily',
+                'support_needed': 'medium',
+                'key_emotions': ['neutral'],
+                'recommended_approach': 'flexible'
+            }
 
     def generate_daily_response(self, user, sentiment_data):
         """Generate appropriate response based on daily check-in sentiment."""

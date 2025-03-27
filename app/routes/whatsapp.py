@@ -239,7 +239,59 @@ def handle_message(user_id: str, message_text: str, instance_id: str, services: 
         
         logger.info(f"User state: {current_state}, Planning type: {planning_type}")
         
-        # Handle task update commands first
+        # Handle interactive messages (button clicks) directly without sentiment analysis
+        if isinstance(message_text, dict) and message_text.get('type') == 'interactive':
+            interactive_data = message_text.get('interactive', {})
+            if interactive_data.get('type') == 'button_reply':
+                button_reply = interactive_data['button_reply']
+                button_id = button_reply['id']
+                
+                if current_state == 'AWAITING_PLANNING_CHOICE':
+                    if button_id == 'weekly':
+                        # User chose weekly planning
+                        context_updates = {'planning_type': 'weekly'}
+                        services['task'].update_user_state(user_id, 'WEEKLY_TASK_INPUT', instance_id, context_updates)
+                        response = (
+                            "Let's plan your tasks for the upcoming week. Please reply with your tasks in this format:\n\n"
+                            "Monday: Task 1, Task 2, Task 3\n"
+                            "Tuesday: Task 1, Task 2, Task 3\n"
+                            "Wednesday: Task 1, Task 2, Task 3\n"
+                            "Thursday: Task 1, Task 2, Task 3\n"
+                            "Friday: Task 1, Task 2, Task 3"
+                        )
+                        services['whatsapp'].send_message(user_id, response)
+                    elif button_id == 'daily':
+                        # User chose daily planning
+                        context_updates = {'planning_type': 'daily'}
+                        services['task'].update_user_state(user_id, 'DAILY_CHECK_IN', instance_id, context_updates)
+                        response = (
+                            "Great choice! I'll check in with you each morning to help plan your day. "
+                            "No pressure—just a little nudge to help you stay on track. "
+                            "Looking forward to planning with you each day! 😊"
+                        )
+                        services['whatsapp'].send_message(user_id, response)
+                    return
+                    
+                elif current_state == 'AWAITING_SUPPORT_CHOICE':
+                    if button_id == 'just_talk':
+                        new_state = 'EMOTIONAL_SUPPORT'
+                        response = "I'm here to listen. Tell me more about what's on your mind."
+                    elif button_id == 'self_care':
+                        new_state = 'SELF_CARE_DAY'
+                        response = "Taking a self-care day is a wise choice. Would you like some self-care activity suggestions?"
+                    elif button_id == 'small_task':
+                        new_state = 'SMALL_TASK_FOCUS'
+                        response = "Let's pick one small, manageable task to focus on. What feels most doable right now?"
+                    
+                    services['whatsapp'].send_message(user_id, response)
+                    services['task'].update_user_state(user_id, new_state, instance_id, context)
+                    return
+            return
+        
+        # For text messages, proceed with normal handling
+        message_text = str(message_text)
+        
+        # Handle task update commands
         command_match = re.match(r'^(DONE|PROGRESS|STUCK)\s+(\d+)$', message_text.strip().upper())
         if command_match:
             response = handle_task_command(user_id, command_match, instance_id, services)
@@ -257,17 +309,7 @@ def handle_message(user_id: str, message_text: str, instance_id: str, services: 
                     if tasks:
                         response = f"Here are your tasks for {today}:\n"
                         for i, task in enumerate(tasks, 1):
-                            # Only show status emojis if it's after the initial check-in
-                            if context.get('initial_tasks_set'):
-                                status = task.get('status', '')
-                                status_emoji = {
-                                    'completed': '✅',
-                                    'in_progress': '🔄',
-                                    'stuck': '❌'
-                                }.get(status, '')
-                                response += f"{i}. {task['task']} {status_emoji}\n"
-                            else:
-                                response += f"{i}. {task['task']}\n"
+                            response += f"{i}. {task['task']}\n"
                     else:
                         response = f"You haven't set any tasks for {today} yet."
                 else:
@@ -275,17 +317,7 @@ def handle_message(user_id: str, message_text: str, instance_id: str, services: 
             else:
                 response = "Here are your current tasks:\n"
                 for i, task in enumerate(tasks, 1):
-                    # Only show status emojis if it's after the initial check-in
-                    if context.get('initial_tasks_set'):
-                        status = task.get('status', '')
-                        status_emoji = {
-                            'completed': '✅',
-                            'in_progress': '🔄',
-                            'stuck': '❌'
-                        }.get(status, '')
-                        response += f"{i}. {task['task']} {status_emoji}\n"
-                    else:
-                        response += f"{i}. {task['task']}\n"
+                    response += f"{i}. {task['task']}\n"
             services['whatsapp'].send_message(user_id, response)
             return
         
@@ -311,13 +343,7 @@ def handle_message(user_id: str, message_text: str, instance_id: str, services: 
                     if tasks:
                         response = f"Here are your tasks for {today}:\n"
                         for i, task in enumerate(tasks, 1):
-                            status = task.get('status', '')
-                            status_emoji = {
-                                'completed': '✅',
-                                'in_progress': '🔄',
-                                'stuck': '❌'
-                            }.get(status, '')
-                            response += f"{i}. {task['task']} {status_emoji}\n"
+                            response += f"{i}. {task['task']}\n"
                         response += "\nI'll check in at midday to see how you're doing! Remember you can:\n"
                         response += "• Use DONE [number] when you complete a task\n"
                         response += "• Use PROGRESS [number] when you start a task\n"
