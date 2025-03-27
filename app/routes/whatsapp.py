@@ -694,43 +694,52 @@ def handle_daily_checkin(user_id: str, message_text: str, instance_id: str, serv
             new_state = 'AWAITING_SUPPORT_CHOICE'
             
         else:  # positive or neutral state
-            # Check planning type and get tasks if weekly
+            # Check planning type and get tasks
             planning_type = context.get('planning_type')
             logger.info(f"Planning type for user {user_id}: {planning_type}")
             
+            # Get today's tasks based on planning type
+            today = datetime.now().strftime('%A')
+            tasks = None
+            
             if planning_type == 'weekly':
                 # Get today's tasks from weekly plan
-                today = datetime.now().strftime('%A')
                 tasks = services['task'].get_weekly_tasks(user_id, instance_id, today)
-                
-                if tasks:
-                    task_list = "\n".join([f"{i+1}. {task['task']}" for i, task in enumerate(tasks)])
-                    response = (
-                        f"That's fantastic, {name}! 🌟\n\n"
-                        f"Here are your tasks for {today}:\n"
-                        f"{task_list}\n\n"
-                        "I'll check in with you at midday to see how things are going! Remember you can:\n"
-                        "• Use DONE [number] when you complete a task\n"
-                        "• Use PROGRESS [number] when you start working on it\n"
-                        "• Use STUCK [number] if you need some support"
-                    )
-                    new_state = 'DAILY_TASK_SELECTION'
-                    context_updates['current_tasks'] = tasks
-                else:
+                logger.info(f"Retrieved weekly tasks for {today}: {tasks}")
+            else:
+                # Get daily tasks if any
+                tasks = services['task'].get_daily_tasks(user_id, instance_id)
+                logger.info(f"Retrieved daily tasks: {tasks}")
+            
+            if tasks:
+                task_list = "\n".join([f"{i+1}. {task['task']}" for i, task in enumerate(tasks)])
+                response = (
+                    f"That's great to hear, {name}! 🌟\n\n"
+                    f"Here are your tasks for {today}:\n"
+                    f"{task_list}\n\n"
+                    "I'll check in with you at midday to see how things are going! Remember you can:\n"
+                    "• Use DONE [number] when you complete a task\n"
+                    "• Use PROGRESS [number] when you start working on it\n"
+                    "• Use STUCK [number] if you need some support"
+                )
+                new_state = 'DAILY_TASK_SELECTION'
+                context_updates['current_tasks'] = tasks
+            else:
+                # Only ask for new tasks if none exist
+                if planning_type == 'weekly':
                     response = (
                         f"Good morning, {name}! 🌟\n\n"
                         f"I notice you don't have any tasks set for {today}. "
                         "Would you like to plan some tasks for today?"
                     )
-                    new_state = 'DAILY_TASK_INPUT'
-            else:  # daily planning
-                response = (
-                    f"That's great to hear, {name}! 🌟\n\n"
-                    "Please share your 3 priorities for today in this format:\n"
-                    "1. [Your first task]\n"
-                    "2. [Your second task]\n"
-                    "3. [Your third task]"
-                )
+                else:
+                    response = (
+                        f"That's great to hear, {name}! 🌟\n\n"
+                        "Please share your 3 priorities for today in this format:\n"
+                        "1. [Your first task]\n"
+                        "2. [Your second task]\n"
+                        "3. [Your third task]"
+                    )
                 new_state = 'DAILY_TASK_INPUT'
         
         # Send response
