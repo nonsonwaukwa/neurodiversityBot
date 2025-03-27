@@ -640,21 +640,59 @@ def handle_weekly_task_input(user_id: str, message_text: str, instance_id: str, 
 def handle_daily_checkin(user_id: str, message_text: str, instance_id: str, services: dict, context: dict):
     """Handle the daily check-in flow."""
     try:
-        # Get sentiment analysis
-        analysis = services['sentiment'].analyze_daily_checkin(message_text)
-        logger.info(f"Daily check-in analysis for user {user_id}: {analysis}")
+        logger.info(f"Starting daily check-in handler for user {user_id}")
+        logger.info(f"Message text: {message_text}")
+        logger.info(f"Current context: {context}")
         
-        # Update user's emotional state and energy level
+        # Get user
+        user = User.get_or_create(user_id, instance_id)
+        if not user:
+            logger.error(f"Failed to get/create user {user_id}")
+            services['whatsapp'].send_message(
+                user_id,
+                "I'm having trouble accessing your information. Could you try again in a moment?"
+            )
+            return
+            
+        # Get user's name
+        name = user.name.split('_')[0] if user.name and '_' in user.name else (user.name or "Friend")
+        logger.info(f"Processing for user: {name}")
+        
+        # Handle interactive messages (button clicks) directly
+        if (isinstance(message_text, dict) and 
+            message_text.get('type') == 'interactive' and 
+            message_text.get('interactive', {}).get('type') == 'button_reply'):
+            
+            button_response = message_text['interactive']['button_reply']
+            logger.info(f"Received button response: {button_response}")
+            
+            if button_response['id'] in ['just_talk', 'self_care', 'small_task']:
+                handle_support_choice(button_response['id'], user_id, instance_id, services, context)
+                return
+                
+        # Get sentiment analysis
+        logger.info("Calling sentiment analysis service")
+        analysis = services['sentiment'].analyze_daily_checkin(message_text)
+        logger.info(f"Daily check-in analysis result: {analysis}")
+        
+        # Update context with analysis results
+        context_updates = {
+            'emotional_state': analysis.get('emotional_state'),
+            'energy_level': analysis.get('energy_level'),
+            'planning_type': analysis.get('planning_type'),
+            'last_check_in': int(time.time()),
+            'support_needed': analysis.get('support_needed'),
+            'key_emotions': analysis.get('key_emotions', []),
+            'recommended_approach': analysis.get('recommended_approach')
+        }
+        logger.info(f"Context updates: {context_updates}")
+        
+        # Update user's state with new context
         services['task'].update_user_state(
             user_id,
-            'DAILY_CHECK_IN',  # Use string directly instead of accessing STATES
+            'DAILY_CHECK_IN',
             instance_id,
-            {
-                'emotional_state': analysis.get('emotional_state'),
-                'energy_level': analysis.get('energy_level'),
-                'planning_type': analysis.get('planning_type'),  # Make sure to store the planning type
-                'last_check_in': int(time.time())  # Add timestamp for last check-in
-            }
+            context_updates
         )
         
         # Get user's current state to check planning type
@@ -675,52 +713,125 @@ def handle_daily_checkin(user_id: str, message_text: str, instance_id: str, serv
             logger.info(f"Retrieved daily tasks: {tasks}")
         
         # Generate response based on emotional state and tasks
-        if analysis.get('emotional_state') in ['overwhelmed', 'burnt_out', 'distressed']:
+        emotional_state = analysis.get('emotional_state')
+        energy_level = analysis.get('energy_level')
+        logger.info(f"Building response for emotional_state: {emotional_state}, energy_level: {energy_level}")
+        
+        if emotional_state in ['overwhelmed', 'burnt_out', 'distressed']:
             response = (
-                "I hear you, and it's completely okay to feel this way. 💜\n\n"
-                "How would you like to proceed?\n\n"
-                "1. Just talk about how you're feeling\n"
-                "2. Take a self-care day\n"
-                "3. Focus on one small task"
+                f"I hear you, {name}, and it's completely okay to feel this way. 💜\n\n"
+                "How would you like to proceed?"
             )
             try:
                 services['whatsapp'].send_interactive_buttons(
                     user_id,
-                    "I hear you, and it's completely okay to feel this way. 💜\n\nHow would you like to proceed?",
+                    response,
                     [
                         {"id": "just_talk", "title": "Talk about feelings"},
                         {"id": "self_care", "title": "Take a self-care day"},
                         {"id": "small_task", "title": "Focus on one small task"}
                     ]
                 )
-                # Update state to await support choice
-                services['task'].update_user_state(user_id, 'AWAITING_SUPPORT_CHOICE', instance_id)
+                new_state = 'AWAITING_SUPPORT_CHOICE'
             except Exception as e:
                 logger.error(f"Failed to send interactive buttons: {e}")
-                services['whatsapp'].send_message(user_id, response)
-                services['task'].update_user_state(user_id, 'EMOTIONAL_SUPPORT', instance_id)
+                fallback_response = (
+                    f"{response}\n\n"
+                    "1. Just talk about how you're feeling\n"
+                    "2. Take a self-care day\n"
+                    "3. Focus on one small task"
+                )
+                services['whatsapp'].send_message(user_id, fallback_response)
+                new_state = 'EMOTIONAL_SUPPORT'
         else:
             if tasks:
                 task_list = "\n".join([f"• {task['task']}" for task in tasks])
-                response = f"I'm glad you're feeling good! Here are your tasks for today:\n\n{task_list}\n\nWould you like to update the status of any of these tasks?"
+                response = (
+                    f"I'm glad you're feeling good, {name}! Here are your tasks for today:\n\n"
+                    f"{task_list}\n\n"
+                    "Would you like to update the status of any of these tasks?"
+                )
                 services['whatsapp'].send_message(user_id, response)
-                # Update state to handle task updates
-                services['task'].update_user_state(user_id, 'TASK_UPDATE', instance_id)
+                new_state = 'TASK_UPDATE'
             else:
                 if planning_type == 'weekly':
-                    response = f"I see you're on a weekly plan but I don't see any tasks set for {today}. Would you like to plan some tasks for today?"
+                    response = (
+                        f"I see you're on a weekly plan but I don't see any tasks set for {today}. "
+                        "Would you like to plan some tasks for today?"
+                    )
                     services['whatsapp'].send_message(user_id, response)
-                    services['task'].update_user_state(user_id, 'WEEKLY_TASK_INPUT', instance_id)
+                    new_state = 'WEEKLY_TASK_INPUT'
                 else:
-                    response = "Great! Since you're feeling positive, what are three things you'd like to accomplish today?"
+                    response = (
+                        f"Great energy, {name}! Since you're feeling positive, "
+                        "what are three things you'd like to accomplish today?"
+                    )
                     services['whatsapp'].send_message(user_id, response)
-                    services['task'].update_user_state(user_id, 'DAILY_TASK_INPUT', instance_id)
+                    new_state = 'DAILY_TASK_INPUT'
+        
+        # Update user state
+        logger.info(f"Updating user state to: {new_state}")
+        services['task'].update_user_state(
+            user_id, new_state, instance_id, context_updates
+        )
+        logger.info("Daily check-in handler completed successfully")
         
     except Exception as e:
         logger.error(f"Error in handle_daily_checkin: {e}", exc_info=True)
         services['whatsapp'].send_message(
             user_id,
             "I encountered an error processing your message. Let me help you get back on track with your tasks."
+        )
+        # Try to maintain context and state on error
+        try:
+            services['task'].update_user_state(
+                user_id,
+                'DAILY_CHECK_IN',
+                instance_id,
+                {'error_occurred': True, 'last_error': str(e)}
+            )
+        except Exception as state_error:
+            logger.error(f"Failed to update error state: {state_error}")
+
+def handle_support_choice(choice: str, user_id: str, instance_id: str, services: dict, context: dict):
+    """Handle user's choice for emotional support."""
+    try:
+        logger.info(f"Processing support choice '{choice}' for user {user_id}")
+        
+        if choice == 'just_talk':
+            response = (
+                "I'm here to listen. Sometimes just talking about what's on your mind can help. "
+                "Tell me more about what you're experiencing."
+            )
+            new_state = 'EMOTIONAL_SUPPORT'
+        elif choice == 'self_care':
+            response = (
+                "Taking care of yourself is so important. Would you like some suggestions for "
+                "self-care activities that match your energy level?"
+            )
+            new_state = 'SELF_CARE_DAY'
+        else:  # small_task
+            response = (
+                "That's a great approach. Let's pick one small, manageable task to focus on. "
+                "What feels most doable right now?"
+            )
+            new_state = 'SMALL_TASK_FOCUS'
+        
+        services['whatsapp'].send_message(user_id, response)
+        services['task'].update_user_state(
+            user_id,
+            new_state,
+            instance_id,
+            {'support_choice': choice, 'support_started_at': int(time.time())}
+        )
+        logger.info(f"Updated user state to {new_state} for support choice: {choice}")
+        
+    except Exception as e:
+        logger.error(f"Error handling support choice: {e}", exc_info=True)
+        services['whatsapp'].send_message(
+            user_id,
+            "I had trouble processing your choice. Let's start with something simple - "
+            "how are you feeling right now?"
         )
 
 # For backward compatibility, redirect instance-specific routes to the main webhook
