@@ -14,16 +14,21 @@ memory_storage = {
 logger = logging.getLogger(__name__)
 
 class TaskService:
-    # State constants
+    """Service for managing user tasks."""
+    
+    # Define all possible states
     STATES = {
-        'INITIAL': 'initial_state',
-        'WEEKLY_REFLECTION': 'weekly_reflection',
-        'WEEKLY_TASK_SELECTION': 'weekly_task_selection',
-        'DAILY_CHECK_IN': 'daily_check_in',
-        'DAILY_TASK_SELECTION': 'daily_task_selection',
-        'MIDDAY_CHECK_IN': 'midday_check_in',
-        'END_DAY_CHECK_IN': 'end_day_check_in',
-        'TASK_UPDATE': 'task_update'
+        'INITIAL': 'INITIAL',
+        'DAILY_CHECK_IN': 'DAILY_CHECK_IN',
+        'DAILY_TASK_INPUT': 'DAILY_TASK_INPUT',
+        'WEEKLY_REFLECTION': 'WEEKLY_REFLECTION',
+        'WEEKLY_TASK_INPUT': 'WEEKLY_TASK_INPUT',
+        'WEEKLY_PLANNING_COMPLETE': 'WEEKLY_PLANNING_COMPLETE',
+        'AWAITING_PLANNING_CHOICE': 'AWAITING_PLANNING_CHOICE',
+        'AWAITING_SUPPORT_CHOICE': 'AWAITING_SUPPORT_CHOICE',
+        'EMOTIONAL_SUPPORT': 'EMOTIONAL_SUPPORT',
+        'SELF_CARE_DAY': 'SELF_CARE_DAY',
+        'SMALL_TASK_FOCUS': 'SMALL_TASK_FOCUS'
     }
 
     # Check-in types
@@ -35,6 +40,7 @@ class TaskService:
     }
 
     def __init__(self):
+        """Initialize TaskService."""
         try:
             self.db = firestore.client()
             self.use_firestore = True
@@ -638,3 +644,34 @@ class TaskService:
         except Exception as e:
             logger.error(f"[GET_WEEKLY] Error getting weekly tasks for user {user_id}: {e}", exc_info=True)
             return [] 
+
+    def should_send_checkin(self, user_id: str, instance_id: str) -> bool:
+        """Check if it's time to send a check-in message to the user."""
+        try:
+            # Get user's state
+            user_state = self.get_user_state(user_id, instance_id)
+            if not user_state:
+                return True  # If no state found, assume check-in needed
+                
+            # Get last check-in time
+            last_checkin = user_state.get('context', {}).get('last_check_in', 0)
+            current_time = int(time.time())
+            
+            # Check if it's been more than 6 hours since last check-in
+            hours_since_checkin = (current_time - last_checkin) / 3600
+            
+            # Get planning type
+            planning_type = user_state.get('context', {}).get('planning_type')
+            
+            if planning_type == 'weekly':
+                # For weekly planning, check if it's a new day
+                last_checkin_date = datetime.fromtimestamp(last_checkin).date()
+                current_date = datetime.now().date()
+                return current_date > last_checkin_date
+            else:
+                # For daily planning or undefined, check if it's been more than 6 hours
+                return hours_since_checkin >= 6
+                
+        except Exception as e:
+            logger.error(f"Error checking if should send check-in: {e}", exc_info=True)
+            return False 

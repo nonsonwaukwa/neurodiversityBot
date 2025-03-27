@@ -647,12 +647,13 @@ def handle_daily_checkin(user_id: str, message_text: str, instance_id: str, serv
         # Update user's emotional state and energy level
         services['task'].update_user_state(
             user_id,
-            services['task'].STATES['DAILY_CHECK_IN'],
+            'DAILY_CHECK_IN',  # Use string directly instead of accessing STATES
             instance_id,
             {
                 'emotional_state': analysis.get('emotional_state'),
                 'energy_level': analysis.get('energy_level'),
-                'planning_type': analysis.get('planning_type')  # Make sure to store the planning type
+                'planning_type': analysis.get('planning_type'),  # Make sure to store the planning type
+                'last_check_in': int(time.time())  # Add timestamp for last check-in
             }
         )
         
@@ -692,24 +693,28 @@ def handle_daily_checkin(user_id: str, message_text: str, instance_id: str, serv
                         {"id": "small_task", "title": "Focus on one small task"}
                     ]
                 )
+                # Update state to await support choice
+                services['task'].update_user_state(user_id, 'AWAITING_SUPPORT_CHOICE', instance_id)
             except Exception as e:
                 logger.error(f"Failed to send interactive buttons: {e}")
                 services['whatsapp'].send_message(user_id, response)
+                services['task'].update_user_state(user_id, 'EMOTIONAL_SUPPORT', instance_id)
         else:
             if tasks:
                 task_list = "\n".join([f"• {task['task']}" for task in tasks])
                 response = f"I'm glad you're feeling good! Here are your tasks for today:\n\n{task_list}\n\nWould you like to update the status of any of these tasks?"
+                services['whatsapp'].send_message(user_id, response)
+                # Update state to handle task updates
+                services['task'].update_user_state(user_id, 'TASK_UPDATE', instance_id)
             else:
                 if planning_type == 'weekly':
                     response = f"I see you're on a weekly plan but I don't see any tasks set for {today}. Would you like to plan some tasks for today?"
+                    services['whatsapp'].send_message(user_id, response)
+                    services['task'].update_user_state(user_id, 'WEEKLY_TASK_INPUT', instance_id)
                 else:
                     response = "Great! Since you're feeling positive, what are three things you'd like to accomplish today?"
-            services['whatsapp'].send_message(user_id, response)
-        
-        # Update state for next interaction
-        next_state = services['task'].STATES['DAILY_TASK_INPUT']
-        services['task'].update_user_state(user_id, next_state, instance_id)
-        logger.info(f"Updated user {user_id} state to {next_state}")
+                    services['whatsapp'].send_message(user_id, response)
+                    services['task'].update_user_state(user_id, 'DAILY_TASK_INPUT', instance_id)
         
     except Exception as e:
         logger.error(f"Error in handle_daily_checkin: {e}", exc_info=True)
