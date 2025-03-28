@@ -732,9 +732,9 @@ def handle_daily_checkin(user_id: str, message_text: str, instance_id: str, serv
                     user_id,
                     response,
                     [
-                        {"id": "just_talk", "title": "Talk about feelings"},
-                        {"id": "self_care", "title": "Take a self-care day"},
-                        {"id": "small_task", "title": "Focus on one small task"}
+                        {"id": "just_talk", "title": "Talk feelings"},
+                        {"id": "self_care", "title": "Self-care day"},
+                        {"id": "small_task", "title": "Small task"}
                     ]
                 )
                 new_state = 'AWAITING_SUPPORT_CHOICE'
