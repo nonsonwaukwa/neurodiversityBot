@@ -687,3 +687,38 @@ class TaskService:
         except Exception as e:
             logger.error(f"Error checking if should send check-in: {e}", exc_info=True)
             return False 
+
+    def store_daily_tasks(self, user_id: str, tasks: List[Dict], instance_id: str) -> None:
+        """Store daily tasks for a user."""
+        try:
+            logger.info(f"[STORE_DAILY] Starting to store daily tasks for user {user_id}")
+            logger.info(f"[STORE_DAILY] Tasks to store: {tasks}")
+            
+            # Store in unified collection
+            logger.info(f"[STORE_DAILY] Storing in unified collection /users/{user_id}/daily_tasks/")
+            user_ref = self.db.collection('users').document(user_id)
+            daily_tasks_ref = user_ref.collection('daily_tasks').document()
+            daily_tasks_ref.set({
+                'tasks': tasks,
+                'created_at': int(time.time()),
+                'date': datetime.now().strftime('%Y-%m-%d'),
+                'instance_id': instance_id,
+                'status': 'active'
+            })
+            logger.info(f"[STORE_DAILY] Successfully stored in unified collection")
+            
+            # Also store in instance-specific collection
+            logger.info(f"[STORE_DAILY] Storing in instance collection /instances/{instance_id}/users/{user_id}")
+            instance_user_ref = self.db.collection('instances').document(instance_id).collection('users').document(user_id)
+            instance_user_ref.update({
+                'daily_tasks': tasks,
+                'last_daily_planning': int(time.time()),
+                'planning_type': 'daily'
+            })
+            logger.info(f"[STORE_DAILY] Successfully stored in instance collection")
+            
+            logger.info(f"[STORE_DAILY] Completed storing daily tasks for user {user_id}")
+            
+        except Exception as e:
+            logger.error(f"[STORE_DAILY] Error storing daily tasks for user {user_id}: {e}", exc_info=True)
+            raise 
