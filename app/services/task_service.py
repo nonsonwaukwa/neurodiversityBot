@@ -28,7 +28,9 @@ class TaskService:
         'AWAITING_SUPPORT_CHOICE': 'AWAITING_SUPPORT_CHOICE',
         'EMOTIONAL_SUPPORT': 'EMOTIONAL_SUPPORT',
         'SELF_CARE_DAY': 'SELF_CARE_DAY',
-        'SMALL_TASK_FOCUS': 'SMALL_TASK_FOCUS'
+        'SMALL_TASK_FOCUS': 'SMALL_TASK_FOCUS',
+        'THERAPEUTIC_CONVERSATION': 'THERAPEUTIC_CONVERSATION',
+        'TASK_UPDATE': 'TASK_UPDATE'
     }
 
     # Check-in types
@@ -651,10 +653,15 @@ class TaskService:
             # Get user's state
             user_state = self.get_user_state(user_id, instance_id)
             if not user_state:
-                return True  # If no state found, assume check-in needed
+                logger.info("No user state found, assuming check-in needed")
+                return True
                 
             # Get last check-in time
-            last_checkin = user_state.get('context', {}).get('last_check_in', 0)
+            last_checkin = user_state.get('context', {}).get('last_check_in')
+            if last_checkin is None:
+                logger.info("No last check-in time found, assuming check-in needed")
+                return True
+                
             current_time = int(time.time())
             
             # Check if it's been more than 6 hours since last check-in
@@ -662,15 +669,20 @@ class TaskService:
             
             # Get planning type
             planning_type = user_state.get('context', {}).get('planning_type')
+            logger.info(f"Planning type: {planning_type}, Hours since last check-in: {hours_since_checkin}")
             
             if planning_type == 'weekly':
                 # For weekly planning, check if it's a new day
                 last_checkin_date = datetime.fromtimestamp(last_checkin).date()
                 current_date = datetime.now().date()
-                return current_date > last_checkin_date
+                should_checkin = current_date > last_checkin_date
+                logger.info(f"Weekly planning: Last check-in date: {last_checkin_date}, Current date: {current_date}, Should check-in: {should_checkin}")
+                return should_checkin
             else:
                 # For daily planning or undefined, check if it's been more than 6 hours
-                return hours_since_checkin >= 6
+                should_checkin = hours_since_checkin >= 6
+                logger.info(f"Daily planning: Hours since check-in: {hours_since_checkin}, Should check-in: {should_checkin}")
+                return should_checkin
                 
         except Exception as e:
             logger.error(f"Error checking if should send check-in: {e}", exc_info=True)
