@@ -297,6 +297,10 @@ class WhatsAppService:
             buttons (list): List of button objects with 'id' and 'title'
         """
         try:
+            logger.info(f"Sending interactive buttons to user {user_id}")
+            logger.info(f"Message: {message}")
+            logger.info(f"Buttons: {buttons}")
+            
             # Format buttons for WhatsApp API
             button_list = []
             for button in buttons:
@@ -324,11 +328,16 @@ class WhatsAppService:
                 }
             }
             
+            logger.info(f"Sending payload to WhatsApp API: {json.dumps(payload, indent=2)}")
+            
             response = requests.post(
                 f"{self.base_url}/messages",
                 headers=self.headers,
                 json=payload
             )
+            
+            logger.info(f"WhatsApp API response status: {response.status_code}")
+            logger.info(f"WhatsApp API response: {response.text}")
             
             if response.status_code != 200:
                 logger.error(f"Failed to send interactive message: {response.text}")
@@ -336,11 +345,13 @@ class WhatsAppService:
                 fallback_message = message + "\n\n"
                 for i, button in enumerate(buttons, 1):
                     fallback_message += f"{i}. {button['title']}\n"
+                logger.info(f"Sending fallback message: {fallback_message}")
                 self.send_message(user_id, fallback_message)
             
         except Exception as e:
-            logger.error(f"Error sending interactive buttons: {str(e)}")
+            logger.error(f"Error sending interactive buttons: {str(e)}", exc_info=True)
             # Fallback to regular message
+            logger.info(f"Sending fallback message due to error: {message}")
             self.send_message(user_id, message)
 
 def get_whatsapp_service(instance_id: str = 'instance1') -> WhatsAppService:

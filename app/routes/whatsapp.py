@@ -11,6 +11,7 @@ import time
 from datetime import datetime, timedelta, timezone
 import random
 import logging
+import json
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -663,12 +664,16 @@ def handle_daily_checkin(user_id: str, message_text: str, instance_id: str, serv
             message_text.get('type') == 'interactive' and 
             message_text.get('interactive', {}).get('type') == 'button_reply'):
             
+            logger.info(f"Received interactive message: {json.dumps(message_text, indent=2)}")
             button_response = message_text['interactive']['button_reply']
-            logger.info(f"Received button response: {button_response}")
+            logger.info(f"Processing button response: {button_response}")
             
             if button_response['id'] in ['just_talk', 'self_care', 'small_task']:
+                logger.info(f"Handling support choice: {button_response['id']}")
                 handle_support_choice(button_response['id'], user_id, instance_id, services, context)
                 return
+            else:
+                logger.warning(f"Received unknown button ID: {button_response['id']}")
                 
         # Get sentiment analysis
         logger.info("Calling sentiment analysis service")
