@@ -817,11 +817,16 @@ def handle_daily_checkin(user_id: str, message_text: str, instance_id: str, serv
                 logger.info(f"Retrieved daily tasks: {tasks}")
             
             if tasks:
-                task_list = "\n".join([f"• {task['task']}" for task in tasks])
+                task_list = "\n".join([f"{i}. {task['task']}" for i, task in enumerate(tasks, 1)])
                 response = (
                     f"I'm glad you're feeling good, {name}! Here are your tasks for today:\n\n"
                     f"{task_list}\n\n"
-                    "Would you like to update the status of any of these tasks?"
+                    "You can update your tasks using these commands:\n"
+                    "• DONE [number] - Mark a task as complete\n"
+                    "• PROGRESS [number] - Mark a task as in progress\n"
+                    "• STUCK [number] - Let me know if you need help\n"
+                    "• ADD [task] - Add a new task\n"
+                    "• REMOVE [number] - Remove a task"
                 )
                 services['whatsapp'].send_message(user_id, response)
                 new_state = 'TASK_UPDATE'
@@ -835,8 +840,15 @@ def handle_daily_checkin(user_id: str, message_text: str, instance_id: str, serv
                     new_state = 'WEEKLY_TASK_INPUT'
                 else:
                     response = (
-                        f"Great energy, {name}! Since you're feeling positive, "
-                        "what are three things you'd like to accomplish today?"
+                        f"Great energy, {name}! Let's plan your tasks for today.\n\n"
+                        "Please list your tasks in this format:\n"
+                        "1. [Your first task]\n"
+                        "2. [Your second task]\n"
+                        "3. [Your third task]\n\n"
+                        "For example:\n"
+                        "1. Review project documents\n"
+                        "2. Send follow-up emails\n"
+                        "3. Update task tracker"
                     )
                     services['whatsapp'].send_message(user_id, response)
                     new_state = 'DAILY_TASK_INPUT'
@@ -1149,30 +1161,90 @@ def handle_check_in(user_id: str, message_text: str, instance_id: str, services:
             f"You've completed {completed}/{len(tasks)} tasks - that's progress to be proud of! How are you feeling about the rest? Anything I can help with?"
         )
 
-def _process_daily_checkin(self, user, message_text):
-    """Process daily check-in response."""
+def handle_daily_task_input(user_id: str, message_text: str, instance_id: str, services: dict, context: dict):
+    """Handle daily task list input from user."""
     try:
-        # Analyze sentiment
-        sentiment_data = sentiment_service.analyze_daily_checkin(message_text)
-        logger.info(f"Sentiment analysis for user {user.user_id}: {sentiment_data}")
+        logger.info(f"Processing daily task input for user {user_id}")
+        logger.info(f"Task input: {message_text}")
         
-        # Generate response based on sentiment
-        response = sentiment_service.generate_daily_response(user, sentiment_data)
+        # Get user info
+        user = User.get_or_create(user_id, instance_id)
+        if not user:
+            logger.error(f"Failed to get/create user {user_id}")
+            return
+            
+        name = user.name.split('_')[0] if user.name and '_' in user.name else (user.name or "Friend")
         
-        # Send response
-        whatsapp_service = get_whatsapp_service(f'instance{user.account_index}')
-        whatsapp_service.send_message(user.user_id, response)
+        # Parse tasks from the message
+        tasks = []
+        lines = message_text.strip().split('\n')
+        for line in lines:
+            # Remove any numbering and leading/trailing whitespace
+            task = re.sub(r'^\d+\.\s*', '', line).strip()
+            if task:
+                tasks.append({
+                    'task': task,
+                    'status': 'pending',
+                    'created_at': int(time.time())
+                })
         
-        # Update user state based on response
-        if "plan your tasks" in response.lower():
-            user.update_user_state(User.STATE_DAILY_TASK_INPUT)
-        elif "self-care" in response.lower():
-            user.update_user_state(User.STATE_SELF_CARE_DAY)
-        elif "break down" in response.lower():
-            user.update_user_state(User.STATE_DAILY_TASK_BREAKDOWN)
+        if not tasks:
+            # If no valid tasks found, ask user to try again
+            response = (
+                "I couldn't find any tasks in your message. Please list your tasks like this:\n\n"
+                "1. [Your first task]\n"
+                "2. [Your second task]\n"
+                "3. [Your third task]"
+            )
+            services['whatsapp'].send_message(user_id, response)
+            return
         
-        return True
-        
+        # Store the tasks
+        try:
+            services['task'].store_daily_tasks(user_id, tasks, instance_id)
+            
+            # Format tasks for display
+            task_list = "\n".join([f"{i}. {task['task']}" for i, task in enumerate(tasks, 1)])
+            
+            # Send confirmation with task update instructions
+            response = (
+                f"Got it! I've saved your tasks for today:\n\n"
+                f"{task_list}\n\n"
+                "You can update your tasks using these commands:\n"
+                "• DONE [number] - Mark a task as complete\n"
+                "• PROGRESS [number] - Mark a task as in progress\n"
+                "• STUCK [number] - Let me know if you need help\n"
+                "• ADD [task] - Add a new task\n"
+                "• REMOVE [number] - Remove a task\n\n"
+                "I'll check in with you later to see how you're doing! 💪"
+            )
+            services['whatsapp'].send_message(user_id, response)
+            
+            # Update user state
+            context_updates = {
+                'daily_tasks': tasks,
+                'last_task_update': int(time.time())
+            }
+            services['task'].update_user_state(
+                user_id,
+                'TASK_UPDATE',
+                instance_id,
+                context_updates
+            )
+            
+        except Exception as e:
+            logger.error(f"Error storing daily tasks: {str(e)}")
+            services['whatsapp'].send_message(
+                user_id,
+                "I had trouble saving your tasks. Could you try sending them again?"
+            )
+            
     except Exception as e:
-        logger.error(f"Error processing daily check-in: {str(e)}", exc_info=True)
-        return False 
+        logger.error(f"Error processing daily task input: {str(e)}", exc_info=True)
+        services['whatsapp'].send_message(
+            user_id,
+            "I had trouble understanding your task list. Please make sure it follows the format:\n\n"
+            "1. [Your first task]\n"
+            "2. [Your second task]\n"
+            "3. [Your third task]"
+        ) 
