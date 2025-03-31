@@ -761,40 +761,25 @@ def handle_daily_checkin(user_id: str, message_text: str, instance_id: str, serv
         }
         logger.info(f"Context updates: {context_updates}")
         
-        # Update user's state with new context
-        services['task'].update_user_state(
-            user_id,
-            'DAILY_CHECK_IN',
-            instance_id,
-            context_updates
+        # Get emotional state and energy level for response handling
+        emotional_state = analysis.get('emotional_state', 'neutral')
+        energy_level = analysis.get('energy_level', 'medium')
+        key_emotions = analysis.get('key_emotions', [])
+        
+        # Determine if user needs emotional support
+        needs_support = (
+            emotional_state in ['overwhelmed', 'burnt_out', 'distressed'] or
+            energy_level == 'low' or
+            any(emotion in ['anxious', 'stressed', 'exhausted'] for emotion in key_emotions)
         )
         
-        # Get user's current state to check planning type
-        user_state = services['task'].get_user_state(user_id, instance_id)
-        planning_type = user_state.get('planning_type') or user_state.get('context', {}).get('planning_type')
-        logger.info(f"Planning type for user {user_id}: {planning_type}")
+        new_state = 'DAILY_CHECK_IN'
         
-        # Get today's day name
-        today = datetime.now().strftime('%A')
-        
-        # Get tasks based on planning type
-        tasks = []
-        if planning_type == 'weekly':
-            tasks = services['task'].get_weekly_tasks(user_id, instance_id, today)
-            logger.info(f"Retrieved weekly tasks for {today}: {tasks}")
-        else:  # daily or None
-            tasks = services['task'].get_daily_tasks(user_id, instance_id)
-            logger.info(f"Retrieved daily tasks: {tasks}")
-        
-        # Build response based on emotional state and energy level
-        emotional_state = analysis.get('emotional_state')
-        energy_level = analysis.get('energy_level')
-        logger.info(f"Building response for emotional_state: {emotional_state}, energy_level: {energy_level}")
-        
-        if emotional_state in ['overwhelmed', 'burnt_out', 'distressed']:
+        if needs_support:
+            # Offer support options through interactive buttons
             response = (
                 f"I hear you, {name}, and it's completely okay to feel this way. 💜\n\n"
-                "What would you like to d"
+                "What would you like to do?"
             )
             try:
                 services['whatsapp'].send_interactive_buttons(
@@ -808,7 +793,8 @@ def handle_daily_checkin(user_id: str, message_text: str, instance_id: str, serv
                 )
                 new_state = 'AWAITING_SUPPORT_CHOICE'
             except Exception as e:
-                logger.error(f"Failed to send interactive buttons: {e}")
+                logger.error(f"Failed to send interactive buttons: {str(e)}")
+                # Fallback to text response if buttons fail
                 fallback_response = (
                     f"{response}\n\n"
                     "1. Just talk about how you're feeling\n"
@@ -818,6 +804,18 @@ def handle_daily_checkin(user_id: str, message_text: str, instance_id: str, serv
                 services['whatsapp'].send_message(user_id, fallback_response)
                 new_state = 'EMOTIONAL_SUPPORT'
         else:
+            # Get today's day name
+            today = datetime.now().strftime('%A')
+            
+            # Get tasks based on planning type
+            tasks = []
+            if existing_planning_type == 'weekly':
+                tasks = services['task'].get_weekly_tasks(user_id, instance_id, today)
+                logger.info(f"Retrieved weekly tasks for {today}: {tasks}")
+            else:  # daily or None
+                tasks = services['task'].get_daily_tasks(user_id, instance_id)
+                logger.info(f"Retrieved daily tasks: {tasks}")
+            
             if tasks:
                 task_list = "\n".join([f"• {task['task']}" for task in tasks])
                 response = (
@@ -828,7 +826,7 @@ def handle_daily_checkin(user_id: str, message_text: str, instance_id: str, serv
                 services['whatsapp'].send_message(user_id, response)
                 new_state = 'TASK_UPDATE'
             else:
-                if planning_type == 'weekly':
+                if existing_planning_type == 'weekly':
                     response = (
                         f"I see you're on a weekly plan but I don't see any tasks set for {today}. "
                         "Would you like to plan some tasks for today?"
@@ -851,21 +849,11 @@ def handle_daily_checkin(user_id: str, message_text: str, instance_id: str, serv
         logger.info("Daily check-in handler completed successfully")
         
     except Exception as e:
-        logger.error(f"Error in handle_daily_checkin: {e}", exc_info=True)
+        logger.error(f"Error in daily check-in handler: {str(e)}", exc_info=True)
         services['whatsapp'].send_message(
             user_id,
-            "I encountered an error processing your message. Let me help you get back on track with your tasks."
+            "I encountered an error processing your check-in. Let's try again - how are you feeling?"
         )
-        # Try to maintain context and state on error
-        try:
-            services['task'].update_user_state(
-                user_id,
-                'DAILY_CHECK_IN',
-                instance_id,
-                {'error_occurred': True, 'last_error': str(e)}
-            )
-        except Exception as state_error:
-            logger.error(f"Failed to update ebnbrrors state: {state_error}")
 
 def handle_support_choice(choice: str, user_id: str, instance_id: str, services: dict, context: dict):
     """Handle user's choice for emotional support."""
