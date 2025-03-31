@@ -472,13 +472,46 @@ def handle_weekly_reflection(user_id: str, message_text: str, instance_id: str, 
             button_response = message_text['interactive']['button_reply']
             logger.info(f"Received button response: {button_response}")
             
+            # Initialize context updates for button response
+            context_updates = {
+                'last_weekly_checkin': int(time.time())
+            }
+            
             if button_response['id'] == 'weekly':
-                handle_planning_selection('PLAN FOR THE WEEK', user_id, instance_id, services, context)
+                # Set planning type to weekly and move to task input
+                context_updates['planning_type'] = 'weekly'
+                response = (
+                    "Let's plan your tasks for the upcoming week. Please reply with your tasks in this format:\n\n"
+                    "Monday: Task 1, Task 2, Task 3\n"
+                    "Tuesday: Task 1, Task 2, Task 3\n"
+                    "Wednesday: Task 1, Task 2, Task 3\n"
+                    "Thursday: Task 1, Task 2, Task 3\n"
+                    "Friday: Task 1, Task 2, Task 3"
+                )
+                services['whatsapp'].send_message(user_id, response)
+                services['task'].update_user_state(user_id, 'WEEKLY_TASK_INPUT', instance_id, context_updates)
             elif button_response['id'] == 'daily':
-                handle_planning_selection('DAY BY DAY PLANNING', user_id, instance_id, services, context)
+                # Set planning type to daily and move to daily check-in
+                context_updates['planning_type'] = 'daily'
+                response = (
+                    f"Great choice! I'll be here every morning to help you set your daily tasks. "
+                    "No pressure—just a little nudge to help you stay on track. "
+                    "Looking forward to planning with you each day! 😊"
+                )
+                services['whatsapp'].send_message(user_id, response)
+                services['task'].update_user_state(user_id, 'DAILY_CHECK_IN', instance_id, context_updates)
             return
         elif message_text.upper() in ['PLAN FOR THE WEEK', 'DAY BY DAY PLANNING']:
-            handle_planning_selection(message_text.upper(), user_id, instance_id, services, context)
+            # Initialize context updates for text response
+            context_updates = {
+                'last_weekly_checkin': int(time.time())
+            }
+            if message_text.upper() == 'PLAN FOR THE WEEK':
+                context_updates['planning_type'] = 'weekly'
+                services['task'].update_user_state(user_id, 'WEEKLY_TASK_INPUT', instance_id, context_updates)
+            else:
+                context_updates['planning_type'] = 'daily'
+                services['task'].update_user_state(user_id, 'DAILY_CHECK_IN', instance_id, context_updates)
             return
             
         # Analyze sentiment and determine planning type
