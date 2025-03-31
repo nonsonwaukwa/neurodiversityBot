@@ -166,73 +166,61 @@ class TaskService:
                 'last_state_update': int(time.time())
             }
 
-    def update_user_state(self, user_id: str, new_state: str, instance_id: str, context_updates: dict = None):
+    def update_user_state(self, user_id: str, new_state: str, instance_id: str, context_updates: dict = None) -> None:
         """Update user state and context in Firestore."""
         try:
-            # Get user reference
-            user_ref = self.db.collection('instances').document(instance_id).collection('users').document(user_id)
+            if not self.use_firestore:
+                logger.warning("Firestore not available")
+                return
             
-            # Prepare transaction data
-            transaction_data = {
-                'new_state': new_state
+            # Get current user state first
+            current_state = self.get_user_state(user_id, instance_id)
+            
+            # Initialize updates dictionary
+            updates = {
+                'state': new_state,
+                'last_state_update': int(time.time())
             }
-            if context_updates is not None:
-                transaction_data['context_updates'] = context_updates
             
-            # Create transaction function with data
-            @firestore.transactional
-            def update_in_transaction(transaction, user_ref):
-                """Update user state in a transaction."""
-                snapshot = user_ref.get(transaction=transaction)
-                if not snapshot.exists:
-                    return False
-
-                # Get current data
-                current_data = snapshot.to_dict()
-                current_context = current_data.get('context', {})
+            # Handle context updates
+            if context_updates:
+                # Check if planning_type is in context_updates
+                planning_type = context_updates.get('planning_type')
                 
-                # Initialize updates
-                updates = {}
+                # If planning_type exists in context_updates, move it to root level
+                if planning_type is not None:
+                    updates['planning_type'] = planning_type
+                    # Remove from context_updates to avoid duplication
+                    context_updates.pop('planning_type')
+                elif current_state and current_state.get('planning_type'):
+                    # Preserve existing root-level planning_type if it exists
+                    updates['planning_type'] = current_state['planning_type']
+                elif current_state and current_state.get('context', {}).get('planning_type'):
+                    # If planning_type is in context, move it to root level
+                    updates['planning_type'] = current_state['context']['planning_type']
                 
-                # Update state if provided
-                if 'new_state' in transaction._data:
-                    updates['state'] = transaction._data['new_state']
-                
-                # Handle context updates
-                if 'context_updates' in transaction._data:
-                    context_updates = transaction._data['context_updates']
-                    # Create new context by merging current context with updates
-                    new_context = current_context.copy()
-                    new_context.update(context_updates)
-                    updates['context'] = new_context
-                    
-                    # Special handling for planning_type
-                    if 'planning_type' in context_updates:
-                        updates['planning_type'] = context_updates['planning_type']
-                        updates['planning_type_updated_at'] = int(time.time())
-                
-                # Only update if we have changes
-                if updates:
-                    transaction.update(user_ref, updates)
-                
-                return True
+                # Update context
+                if not current_state or 'context' not in current_state:
+                    updates['context'] = context_updates
+                else:
+                    # Merge with existing context
+                    merged_context = current_state['context'].copy()
+                    merged_context.update(context_updates)
+                    updates['context'] = merged_context
             
-            # Create transaction
-            transaction = self.db.transaction()
-            transaction._data = transaction_data
+            # Log the final updates
+            logger.info(f"Root level planning_type for user {user_id}: {updates.get('planning_type')}")
+            logger.info(f"Context level planning_type for user {user_id}: {updates.get('context', {}).get('planning_type')}")
+            logger.info(f"Using planning_type for user {user_id}: {updates.get('planning_type')}")
             
-            # Execute transaction
-            success = update_in_transaction(transaction, user_ref)
-            
-            if not success:
-                logger.error(f"Failed to update state for user {user_id}")
-                return False
+            # Update in Firestore
+            instance_user_ref = self.db.collection('instances').document(instance_id).collection('users').document(user_id)
+            instance_user_ref.set(updates, merge=True)
             
             logger.info(f"Updated state for user {user_id} to {new_state}")
-            return True
             
         except Exception as e:
-            logger.error(f"Error updating user state: {e}")
+            logger.error(f"Error updating user state: {str(e)}", exc_info=True)
             raise
 
     def create_user(self, user_id: str, instance_id: str = 'default', phone_number: str = None) -> None:

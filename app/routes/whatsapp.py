@@ -726,44 +726,28 @@ def handle_weekly_task_input(user_id: str, message_text: str, instance_id: str, 
 def handle_daily_checkin(user_id: str, message_text: str, instance_id: str, services: dict, context: dict):
     """Handle the daily check-in flow."""
     try:
-        logger.info(f"Starting daily check-in handler for user {user_id}")
+        logger.info(f"Processing daily check-in for user {user_id}")
         logger.info(f"Message text: {message_text}")
         logger.info(f"Current context: {context}")
         
-        # Get user
+        # Get user info
         user = User.get_or_create(user_id, instance_id)
         if not user:
             logger.error(f"Failed to get/create user {user_id}")
-            services['whatsapp'].send_message(
-                user_id,
-                "I'm having trouble accessing your information. Could you try again in a moment?"
-            )
             return
             
-        # Get user's name
         name = user.name.split('_')[0] if user.name and '_' in user.name else (user.name or "Friend")
         logger.info(f"Processing for user: {name}")
         
-        # Handle interactive messages (button clicks) directly
-        if (isinstance(message_text, dict) and 
-            message_text.get('type') == 'interactive' and 
-            message_text.get('interactive', {}).get('type') == 'button_reply'):
-            
-            logger.info(f"Received interactive message: {json.dumps(message_text, indent=2)}")
-            button_response = message_text['interactive']['button_reply']
-            logger.info(f"Processing button response: {button_response}")
-            
-            if button_response['id'] in ['just_talk', 'self_care', 'small_task']:
-                logger.info(f"Handling support choice: {button_response['id']}")
-                handle_support_choice(button_response['id'], user_id, instance_id, services, context)
-                return
-            else:
-                logger.warning(f"Received unknown button ID: {button_response['id']}")
-                
-        # Get sentiment analysis
+        # Analyze sentiment
         logger.info("Calling sentiment analysis service")
         analysis = services['sentiment'].analyze_daily_checkin(message_text)
         logger.info(f"Daily check-in analysis result: {analysis}")
+        
+        # Get the existing planning type from user state
+        user_state = services['task'].get_user_state(user_id, instance_id)
+        existing_planning_type = user_state.get('planning_type') or user_state.get('context', {}).get('planning_type')
+        logger.info(f"Existing planning type: {existing_planning_type}")
         
         # Update context with analysis results, preserving existing planning_type
         context_updates = {
@@ -772,14 +756,9 @@ def handle_daily_checkin(user_id: str, message_text: str, instance_id: str, serv
             'last_check_in': int(time.time()),
             'support_needed': analysis.get('support_needed'),
             'key_emotions': analysis.get('key_emotions', []),
-            'recommended_approach': analysis.get('recommended_approach')
+            'recommended_approach': analysis.get('recommended_approach'),
+            'planning_type': existing_planning_type  # Preserve existing planning type
         }
-        
-        # Only set planning_type if it doesn't exist
-        existing_planning_type = context.get('planning_type')
-        if not existing_planning_type:
-            context_updates['planning_type'] = analysis.get('planning_type')
-            
         logger.info(f"Context updates: {context_updates}")
         
         # Update user's state with new context
@@ -792,7 +771,7 @@ def handle_daily_checkin(user_id: str, message_text: str, instance_id: str, serv
         
         # Get user's current state to check planning type
         user_state = services['task'].get_user_state(user_id, instance_id)
-        planning_type = user_state.get('context', {}).get('planning_type')
+        planning_type = user_state.get('planning_type') or user_state.get('context', {}).get('planning_type')
         logger.info(f"Planning type for user {user_id}: {planning_type}")
         
         # Get today's day name
@@ -807,7 +786,7 @@ def handle_daily_checkin(user_id: str, message_text: str, instance_id: str, serv
             tasks = services['task'].get_daily_tasks(user_id, instance_id)
             logger.info(f"Retrieved daily tasks: {tasks}")
         
-        # Generate response based on emotional state and tasks
+        # Build response based on emotional state and energy level
         emotional_state = analysis.get('emotional_state')
         energy_level = analysis.get('energy_level')
         logger.info(f"Building response for emotional_state: {emotional_state}, energy_level: {energy_level}")
