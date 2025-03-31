@@ -449,6 +449,11 @@ def handle_weekly_reflection(user_id: str, message_text: str, instance_id: str, 
         logger.info(f"Message text: {message_text}")
         logger.info(f"Current context: {context}")
         
+        # Initialize context_updates at the start
+        context_updates = {
+            'last_weekly_checkin': int(time.time())
+        }
+        
         # Get user
         user = User.get_or_create(user_id, instance_id)
         if not user:
@@ -471,11 +476,6 @@ def handle_weekly_reflection(user_id: str, message_text: str, instance_id: str, 
             
             button_response = message_text['interactive']['button_reply']
             logger.info(f"Received button response: {button_response}")
-            
-            # Initialize context updates for button response
-            context_updates = {
-                'last_weekly_checkin': int(time.time())
-            }
             
             if button_response['id'] == 'weekly':
                 # Set planning type to weekly and move to task input
@@ -502,10 +502,6 @@ def handle_weekly_reflection(user_id: str, message_text: str, instance_id: str, 
                 services['task'].update_user_state(user_id, 'DAILY_CHECK_IN', instance_id, context_updates)
             return
         elif message_text.upper() in ['PLAN FOR THE WEEK', 'DAY BY DAY PLANNING']:
-            # Initialize context updates for text response
-            context_updates = {
-                'last_weekly_checkin': int(time.time())
-            }
             if message_text.upper() == 'PLAN FOR THE WEEK':
                 context_updates['planning_type'] = 'weekly'
                 services['task'].update_user_state(user_id, 'WEEKLY_TASK_INPUT', instance_id, context_updates)
@@ -520,14 +516,13 @@ def handle_weekly_reflection(user_id: str, message_text: str, instance_id: str, 
         logger.info(f"Weekly check-in analysis result: {analysis}")
         
         # Update context with analysis results
-        context_updates = {
+        context_updates.update({
             'emotional_state': analysis.get('emotional_state'),
             'energy_level': analysis.get('energy_level'),
             'support_needed': analysis.get('support_needed'),
             'key_emotions': analysis.get('key_emotions', []),
-            'recommended_approach': analysis.get('recommended_approach'),
-            'last_weekly_checkin': int(time.time())
-        }
+            'recommended_approach': analysis.get('recommended_approach')
+        })
         logger.info(f"Context updates: {context_updates}")
         
         # Generate response based on sentiment
@@ -554,13 +549,7 @@ def handle_weekly_reflection(user_id: str, message_text: str, instance_id: str, 
                 "Let's make the most out of this week ahead!\n\n"
                 "How would you like to plan?"
             )
-            # Initialize context updates for interactive buttons
-            context_updates = {
-                'last_weekly_checkin': int(time.time()),
-                'planning_type': 'pending_selection',
-                'emotional_state': emotional_state,
-                'energy_level': energy_level
-            }
+            context_updates['planning_type'] = 'pending_selection'
             # Send interactive buttons for planning selection
             try:
                 services['whatsapp'].send_interactive_buttons(
@@ -592,9 +581,20 @@ def handle_weekly_reflection(user_id: str, message_text: str, instance_id: str, 
             
     except Exception as e:
         logger.error(f"Error handling weekly reflection for user {user_id}: {e}")
+        # Even in case of error, ensure we have context_updates defined
+        if not 'context_updates' in locals():
+            context_updates = {
+                'last_weekly_checkin': int(time.time()),
+                'error_occurred': True,
+                'error_message': str(e)
+            }
         services['whatsapp'].send_message(
             user_id,
             "I'm having trouble processing your response right now. Could you try sharing your thoughts again?"
+        )
+        # Update state to indicate error
+        services['task'].update_user_state(
+            user_id, 'WEEKLY_REFLECTION', instance_id, context_updates
         )
 
 def handle_planning_selection(selection: str, user_id: str, instance_id: str, services: dict, context: dict):
