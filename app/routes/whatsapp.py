@@ -554,6 +554,13 @@ def handle_weekly_reflection(user_id: str, message_text: str, instance_id: str, 
                 "Let's make the most out of this week ahead!\n\n"
                 "How would you like to plan?"
             )
+            # Initialize context updates for interactive buttons
+            context_updates = {
+                'last_weekly_checkin': int(time.time()),
+                'planning_type': 'pending_selection',
+                'emotional_state': emotional_state,
+                'energy_level': energy_level
+            }
             # Send interactive buttons for planning selection
             try:
                 services['whatsapp'].send_interactive_buttons(
@@ -565,7 +572,6 @@ def handle_weekly_reflection(user_id: str, message_text: str, instance_id: str, 
                     ]
                 )
                 new_state = 'AWAITING_PLANNING_CHOICE'
-                context_updates['planning_type'] = 'pending_selection'
             except Exception as e:
                 logger.error(f"Failed to send interactive buttons: {e}")
                 # Fallback to regular message with options
@@ -576,7 +582,6 @@ def handle_weekly_reflection(user_id: str, message_text: str, instance_id: str, 
                 )
                 services['whatsapp'].send_message(user_id, fallback_response)
                 new_state = 'AWAITING_PLANNING_CHOICE'
-                context_updates['planning_type'] = 'pending_selection'
         
         # Update user state
         logger.info(f"Updating user state to: {new_state}")
