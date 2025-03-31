@@ -157,64 +157,75 @@ class TaskService:
                 'last_state_update': int(time.time())
             }
 
-    def update_user_state(self, user_id: str, new_state: str, instance_id: str, context_updates: Dict = None):
-        """Update user state and context using a transaction."""
-        @firestore.transactional
-        def update_in_transaction(transaction, user_ref):
-            snapshot = user_ref.get(transaction=transaction)
-            current_data = snapshot.to_dict() if snapshot.exists else {}
-            
-            # Prepare update data
-            update_data = {
-                'state': new_state,
-                'last_state_update': int(time.time())
-            }
-            
-            # Handle planning_type specially - if it's in context_updates, move it to root
-            if context_updates and 'planning_type' in context_updates:
-                update_data['planning_type'] = context_updates['planning_type']
-                # Remove from context_updates to avoid duplication
-                context_updates = {k: v for k, v in context_updates.items() if k != 'planning_type'}
-            elif current_data.get('planning_type'):
-                # Preserve existing root-level planning_type
-                update_data['planning_type'] = current_data['planning_type']
-            
-            # Update context if provided
-            if context_updates:
-                current_context = current_data.get('context', {})
-                current_context.update(context_updates)
-                update_data['context'] = current_context
-            
-            transaction.set(user_ref, update_data, merge=True)
-        
+    def update_user_state(self, user_id: str, new_state: str, instance_id: str, context_updates: dict = None):
+        """Update user state and context in Firestore."""
         try:
-            if self.use_firestore:
-                user_ref = self.db.collection('instances').document(instance_id).collection('users').document(user_id)
-                transaction = self.db.transaction()
-                update_in_transaction(transaction, user_ref)
-            else:
-                # In-memory fallback
-                user_key = f"{instance_id}:{user_id}"
-                if user_key not in memory_storage['users']:
-                    memory_storage['users'][user_key] = {}
+            # Get user reference
+            user_ref = self.db.collection('instances').document(instance_id).collection('users').document(user_id)
+            
+            # Prepare transaction data
+            transaction_data = {
+                'new_state': new_state
+            }
+            if context_updates is not None:
+                transaction_data['context_updates'] = context_updates
+            
+            # Create transaction function with data
+            @firestore.transactional
+            def update_in_transaction(transaction, user_ref):
+                """Update user state in a transaction."""
+                snapshot = user_ref.get(transaction=transaction)
+                if not snapshot.exists:
+                    return False
+
+                # Get current data
+                current_data = snapshot.to_dict()
+                current_context = current_data.get('context', {})
                 
-                # Handle planning_type specially for in-memory storage too
-                if context_updates and 'planning_type' in context_updates:
-                    memory_storage['users'][user_key]['planning_type'] = context_updates['planning_type']
-                    context_updates = {k: v for k, v in context_updates.items() if k != 'planning_type'}
+                # Initialize updates
+                updates = {}
                 
-                memory_storage['users'][user_key].update({
-                    'state': new_state,
-                    'last_state_update': int(time.time())
-                })
-                if context_updates:
-                    current_context = memory_storage['users'][user_key].get('context', {})
-                    current_context.update(context_updates)
-                    memory_storage['users'][user_key]['context'] = current_context
+                # Update state if provided
+                if 'new_state' in transaction._data:
+                    updates['state'] = transaction._data['new_state']
+                
+                # Handle context updates
+                if 'context_updates' in transaction._data:
+                    context_updates = transaction._data['context_updates']
+                    # Create new context by merging current context with updates
+                    new_context = current_context.copy()
+                    new_context.update(context_updates)
+                    updates['context'] = new_context
+                    
+                    # Special handling for planning_type
+                    if 'planning_type' in context_updates:
+                        updates['planning_type'] = context_updates['planning_type']
+                        updates['planning_type_updated_at'] = int(time.time())
+                
+                # Only update if we have changes
+                if updates:
+                    transaction.update(user_ref, updates)
+                
+                return True
+            
+            # Create transaction
+            transaction = self.db.transaction()
+            transaction._data = transaction_data
+            
+            # Execute transaction
+            success = update_in_transaction(transaction, user_ref)
+            
+            if not success:
+                logger.error(f"Failed to update state for user {user_id}")
+                return False
+            
+            logger.info(f"Updated state for user {user_id} to {new_state}")
+            return True
+            
         except Exception as e:
-            logger.error(f"Error updating user state: {str(e)}")
+            logger.error(f"Error updating user state: {e}")
             raise
-        
+
     def create_user(self, user_id: str, instance_id: str = 'default', phone_number: str = None) -> None:
         """Create a new user in the system."""
         user_data = {
