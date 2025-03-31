@@ -727,16 +727,21 @@ def handle_daily_checkin(user_id: str, message_text: str, instance_id: str, serv
         analysis = services['sentiment'].analyze_daily_checkin(message_text)
         logger.info(f"Daily check-in analysis result: {analysis}")
         
-        # Update context with analysis results
+        # Update context with analysis results, preserving existing planning_type
         context_updates = {
             'emotional_state': analysis.get('emotional_state'),
             'energy_level': analysis.get('energy_level'),
-            'planning_type': analysis.get('planning_type'),
             'last_check_in': int(time.time()),
             'support_needed': analysis.get('support_needed'),
             'key_emotions': analysis.get('key_emotions', []),
             'recommended_approach': analysis.get('recommended_approach')
         }
+        
+        # Only set planning_type if it doesn't exist
+        existing_planning_type = context.get('planning_type')
+        if not existing_planning_type:
+            context_updates['planning_type'] = analysis.get('planning_type')
+            
         logger.info(f"Context updates: {context_updates}")
         
         # Update user's state with new context
@@ -760,7 +765,7 @@ def handle_daily_checkin(user_id: str, message_text: str, instance_id: str, serv
         if planning_type == 'weekly':
             tasks = services['task'].get_weekly_tasks(user_id, instance_id, today)
             logger.info(f"Retrieved weekly tasks for {today}: {tasks}")
-        else:
+        else:  # daily or None
             tasks = services['task'].get_daily_tasks(user_id, instance_id)
             logger.info(f"Retrieved daily tasks: {tasks}")
         

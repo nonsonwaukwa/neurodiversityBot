@@ -61,19 +61,29 @@ class TaskService:
                 
                 if user_doc.exists:
                     user_data = user_doc.to_dict()
+                    context = user_data.get('context', {})
                     return {
                         'state': user_data.get('state', 'INITIAL'),
                         'context': {
-                            'flow_type': user_data.get('flow_type'),  # weekly/daily
-                            'last_check_in': user_data.get('last_check_in'),
-                            'last_task_update': user_data.get('last_task_update'),
-                            'current_tasks': user_data.get('current_tasks', []),
-                            'planning_type': user_data.get('planning_type'),
-                            'emotional_state': user_data.get('emotional_state'),
-                            'energy_level': user_data.get('energy_level'),
-                            'pending_checkins': user_data.get('pending_checkins', []),
-                            'current_checkin_source': user_data.get('current_checkin_source'),
-                            'missed_checkins': user_data.get('missed_checkins', [])
+                            'flow_type': context.get('flow_type'),  # weekly/daily
+                            'last_check_in': context.get('last_check_in'),
+                            'last_task_update': context.get('last_task_update'),
+                            'current_tasks': context.get('current_tasks', []),
+                            'planning_type': context.get('planning_type'),  # Get from context instead of root
+                            'emotional_state': context.get('emotional_state'),
+                            'energy_level': context.get('energy_level'),
+                            'pending_checkins': context.get('pending_checkins', []),
+                            'current_checkin_source': context.get('current_checkin_source'),
+                            'missed_checkins': context.get('missed_checkins', []),
+                            'weekly_tasks': context.get('weekly_tasks', {}),
+                            'daily_tasks': context.get('daily_tasks', []),
+                            'focus_task': context.get('focus_task'),
+                            'task_breakdown': context.get('task_breakdown', []),
+                            'self_care_day': context.get('self_care_day', False),
+                            'last_weekly_planning': context.get('last_weekly_planning'),
+                            'daily_checkin_time': context.get('daily_checkin_time'),
+                            'midday_checkin_time': context.get('midday_checkin_time'),
+                            'endday_checkin_time': context.get('endday_checkin_time')
                         },
                         'last_state_update': user_data.get('last_state_update')
                     }
@@ -91,7 +101,16 @@ class TaskService:
                             'energy_level': None,
                             'pending_checkins': [],
                             'current_checkin_source': None,
-                            'missed_checkins': []
+                            'missed_checkins': [],
+                            'weekly_tasks': {},
+                            'daily_tasks': [],
+                            'focus_task': None,
+                            'task_breakdown': [],
+                            'self_care_day': False,
+                            'last_weekly_planning': None,
+                            'daily_checkin_time': None,
+                            'midday_checkin_time': None,
+                            'endday_checkin_time': None
                         },
                         'last_state_update': int(time.time())
                     }
@@ -112,7 +131,16 @@ class TaskService:
                         'energy_level': None,
                         'pending_checkins': [],
                         'current_checkin_source': None,
-                        'missed_checkins': []
+                        'missed_checkins': [],
+                        'weekly_tasks': {},
+                        'daily_tasks': [],
+                        'focus_task': None,
+                        'task_breakdown': [],
+                        'self_care_day': False,
+                        'last_weekly_planning': None,
+                        'daily_checkin_time': None,
+                        'midday_checkin_time': None,
+                        'endday_checkin_time': None
                     },
                     'last_state_update': int(time.time())
                 })
