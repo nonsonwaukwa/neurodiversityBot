@@ -62,14 +62,18 @@ class TaskService:
                 if user_doc.exists:
                     user_data = user_doc.to_dict()
                     context = user_data.get('context', {})
+                    
+                    # Check for planning_type at root level first, then context
+                    planning_type = user_data.get('planning_type') or context.get('planning_type')
+                    
                     return {
                         'state': user_data.get('state', 'INITIAL'),
                         'context': {
-                            'flow_type': context.get('flow_type'),  # weekly/daily
+                            'flow_type': context.get('flow_type'),
                             'last_check_in': context.get('last_check_in'),
                             'last_task_update': context.get('last_task_update'),
                             'current_tasks': context.get('current_tasks', []),
-                            'planning_type': context.get('planning_type'),  # Get from context instead of root
+                            'planning_type': planning_type,  # Use the planning_type we found
                             'emotional_state': context.get('emotional_state'),
                             'energy_level': context.get('energy_level'),
                             'pending_checkins': context.get('pending_checkins', []),
@@ -166,6 +170,15 @@ class TaskService:
                 'last_state_update': int(time.time())
             }
             
+            # Handle planning_type specially - if it's in context_updates, move it to root
+            if context_updates and 'planning_type' in context_updates:
+                update_data['planning_type'] = context_updates['planning_type']
+                # Remove from context_updates to avoid duplication
+                context_updates = {k: v for k, v in context_updates.items() if k != 'planning_type'}
+            elif current_data.get('planning_type'):
+                # Preserve existing root-level planning_type
+                update_data['planning_type'] = current_data['planning_type']
+            
             # Update context if provided
             if context_updates:
                 current_context = current_data.get('context', {})
@@ -184,6 +197,12 @@ class TaskService:
                 user_key = f"{instance_id}:{user_id}"
                 if user_key not in memory_storage['users']:
                     memory_storage['users'][user_key] = {}
+                
+                # Handle planning_type specially for in-memory storage too
+                if context_updates and 'planning_type' in context_updates:
+                    memory_storage['users'][user_key]['planning_type'] = context_updates['planning_type']
+                    context_updates = {k: v for k, v in context_updates.items() if k != 'planning_type'}
+                
                 memory_storage['users'][user_key].update({
                     'state': new_state,
                     'last_state_update': int(time.time())
@@ -193,7 +212,7 @@ class TaskService:
                     current_context.update(context_updates)
                     memory_storage['users'][user_key]['context'] = current_context
         except Exception as e:
-            print(f"Error updating user state: {str(e)}")
+            logger.error(f"Error updating user state: {str(e)}")
             raise
         
     def create_user(self, user_id: str, instance_id: str = 'default', phone_number: str = None) -> None:
