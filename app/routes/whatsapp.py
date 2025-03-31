@@ -843,7 +843,7 @@ def handle_daily_checkin(user_id: str, message_text: str, instance_id: str, serv
                 {'error_occurred': True, 'last_error': str(e)}
             )
         except Exception as state_error:
-            logger.error(f"Failed to update error state: {state_error}")
+            logger.error(f"Failed to update ebnbrrors state: {state_error}")
 
 def handle_support_choice(choice: str, user_id: str, instance_id: str, services: dict, context: dict):
     """Handle user's choice for emotional support."""
