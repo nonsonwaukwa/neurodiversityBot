@@ -63,8 +63,17 @@ class TaskService:
                     user_data = user_doc.to_dict()
                     context = user_data.get('context', {})
                     
-                    # Check for planning_type at root level first, then context
-                    planning_type = user_data.get('planning_type') or context.get('planning_type')
+                    # First check root level for planning_type
+                    planning_type = user_data.get('planning_type')
+                    logger.info(f"Root level planning_type for user {user_id}: {planning_type}")
+                    
+                    # If not at root, check context
+                    if not planning_type:
+                        planning_type = context.get('planning_type')
+                        logger.info(f"Context level planning_type for user {user_id}: {planning_type}")
+                    
+                    # Log the final planning_type being used
+                    logger.info(f"Using planning_type for user {user_id}: {planning_type}")
                     
                     return {
                         'state': user_data.get('state', 'INITIAL'),
@@ -150,7 +159,7 @@ class TaskService:
                 })
                 
         except Exception as e:
-            print(f"Error getting user state: {str(e)}")
+            logger.error(f"Error getting user state: {str(e)}")
             return {
                 'state': 'INITIAL',
                 'context': {},
