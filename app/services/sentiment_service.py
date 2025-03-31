@@ -88,15 +88,61 @@ Please provide the analysis in JSON format with these fields:
             
     def _get_default_sentiment(self) -> Dict[str, Any]:
         """Return a default sentiment analysis with a balanced perspective."""
-        return {
-            'sentiment': 'neutral',
+        default = {
+            'emotional_state': 'neutral',
             'energy_level': 'medium',
-            'stress_level': 'medium',
-            'executive_function': 'managing',
-            'emotions': ['neutral'],
-            'sensory_overwhelm': False,
-            'communication_style': 'brief'
+            'support_needed': 'medium',
+            'key_emotions': ['neutral'],
+            'recommended_approach': 'flexible'
         }
+        logger.info(f"Using default sentiment: {default}")
+        return default
+
+    def _basic_word_analysis(self, text: str) -> Dict[str, Any]:
+        """Basic word-based sentiment analysis as fallback."""
+        text = text.lower()
+        
+        # Simple word lists for basic analysis
+        positive_words = {'great', 'good', 'happy', 'excited', 'wonderful', 'fantastic', 'amazing', 'love', 'excellent'}
+        negative_words = {'bad', 'sad', 'tired', 'exhausted', 'overwhelmed', 'stressed', 'anxious', 'worried', 'frustrated'}
+        high_energy_words = {'energetic', 'active', 'motivated', 'excited', 'ready', 'enthusiastic', 'pumped'}
+        low_energy_words = {'tired', 'exhausted', 'drained', 'sleepy', 'fatigued', 'lazy', 'unmotivated'}
+        
+        # Count word occurrences
+        pos_count = sum(1 for word in text.split() if word in positive_words)
+        neg_count = sum(1 for word in text.split() if word in negative_words)
+        high_energy_count = sum(1 for word in text.split() if word in high_energy_words)
+        low_energy_count = sum(1 for word in text.split() if word in low_energy_words)
+        
+        # Determine emotional state
+        if pos_count > neg_count:
+            emotional_state = 'positive'
+        elif neg_count > pos_count:
+            emotional_state = 'negative'
+        else:
+            emotional_state = 'neutral'
+            
+        # Determine energy level
+        if high_energy_count > low_energy_count:
+            energy_level = 'high'
+        elif low_energy_count > high_energy_count:
+            energy_level = 'low'
+        else:
+            energy_level = 'medium'
+            
+        # Determine support needed based on negative indicators
+        support_needed = 'high' if neg_count > 2 else ('medium' if neg_count > 0 else 'low')
+        
+        analysis = {
+            'emotional_state': emotional_state,
+            'energy_level': energy_level,
+            'support_needed': support_needed,
+            'key_emotions': [],  # Would need more sophisticated analysis for emotions
+            'recommended_approach': 'flexible'
+        }
+        
+        logger.info(f"Basic word analysis result: {analysis}")
+        return analysis
 
     def get_task_recommendation(self, sentiment: Dict[str, Any]) -> Dict[str, Any]:
         """Get task recommendations based on sentiment analysis, designed for neurodivergent individuals."""
@@ -203,16 +249,15 @@ Return the analysis in this exact JSON format:
 {{
     "emotional_state": "positive/negative/neutral",
     "energy_level": "high/medium/low",
-    "planning_type": "weekly/daily",
     "support_needed": "high/medium/low",
     "key_emotions": ["emotion1", "emotion2"],
-    "recommended_approach": "structured/flexible"
+    "recommended_approach": "structured/flexible/balanced"
 }}"""
 
         payload = {
             'model': 'deepseek-chat',
             'messages': [
-                {'role': 'system', 'content': 'You are an expert in analyzing communication patterns of neurodivergent individuals, with special focus on determining appropriate planning approaches.'},
+                {'role': 'system', 'content': 'You are an expert in analyzing communication patterns and emotional states. You provide nuanced, non-judgmental analysis.'},
                 {'role': 'user', 'content': prompt}
             ],
             'temperature': 0.3
@@ -223,7 +268,8 @@ Return the analysis in this exact JSON format:
             response = requests.post(
                 self.base_url,
                 headers=headers,
-                json=payload
+                json=payload,
+                timeout=10  # Add timeout to prevent hanging
             )
             
             logger.info(f"Received response from Deepseek API: {response.status_code}")
@@ -231,53 +277,32 @@ Return the analysis in this exact JSON format:
             if response.status_code == 200:
                 result = response.json()
                 logger.info(f"Raw API response: {result}")
-                
+                # Parse the JSON response from the model
                 try:
-                    # Extract content from the response
                     content = result['choices'][0]['message']['content']
                     logger.info(f"Raw content: {content}")
-                    
-                    # Remove markdown code blocks and clean up the content
-                    content = content.replace('```json', '').replace('```', '').strip()
-                    # Remove any extra newlines that might interfere with parsing
-                    content = ''.join(line.strip() for line in content.splitlines())
+                    # Extract JSON from the content (it might be wrapped in ```json ```)
+                    json_match = re.search(r'```json\s*(.*?)\s*```', content, re.DOTALL)
+                    if json_match:
+                        content = json_match.group(1)
                     logger.info(f"Cleaned content: {content}")
-                    
                     analysis = json.loads(content)
                     logger.info(f"Parsed sentiment analysis: {analysis}")
-                    
-                    # Validate the response has the expected fields
-                    required_fields = ['emotional_state', 'energy_level', 'planning_type', 'support_needed', 'key_emotions', 'recommended_approach']
-                    if all(field in analysis for field in required_fields):
-                        return analysis
-                    else:
-                        logger.error("Missing required fields in API response")
-                        return self._get_default_sentiment()
-                        
-                except json.JSONDecodeError as e:
-                    logger.error(f"Failed to parse API response: {e}")
-                    logger.error(f"Raw content: {content}")
-                    return self._get_default_sentiment()
+                    return analysis
+                except Exception as e:
+                    logger.error(f"Failed to parse Deepseek response: {str(e)}")
+                    return self._basic_word_analysis(text)
             else:
-                logger.error(f"API error ({response.status_code}): {response.text}")
-                return self._get_default_sentiment()
-                
+                logger.error(f"Deepseek API error ({response.status_code}): {response.text}")
+                return self._basic_word_analysis(text)
         except Exception as e:
             logger.error(f"Exception in sentiment analysis: {str(e)}")
-            return self._get_default_sentiment()
-            
-    def _get_default_sentiment(self) -> Dict[str, Any]:
-        """Return a default sentiment analysis with a balanced perspective."""
-        default = {
-            'emotional_state': 'neutral',
-            'energy_level': 'medium',
-            'planning_type': 'daily',
-            'support_needed': 'medium',
-            'key_emotions': ['neutral'],
-            'recommended_approach': 'flexible'
-        }
-        logger.info(f"Using default sentiment: {default}")
-        return default
+            return self._basic_word_analysis(text)
+
+    def analyze_daily_checkin(self, text: str) -> Dict[str, Any]:
+        """Analyze daily check-in response."""
+        # Use the same analysis approach as weekly check-in
+        return self.analyze_weekly_checkin(text)
 
     def generate_weekly_response(self, analysis: Dict[str, Any], user_name: str) -> Dict[str, str]:
         """Generate a response for the weekly check-in based on sentiment analysis."""
@@ -308,67 +333,6 @@ Return the analysis in this exact JSON format:
             return {
                 'message': response,
                 'planning_type': 'weekly'
-            }
-
-    def analyze_daily_checkin(self, text: str) -> Dict[str, Any]:
-        """Analyze text from daily check-in."""
-        try:
-            logger.info(f"Analyzing daily check-in text: {text}")
-            
-            # Ensure text is a string
-            if not isinstance(text, str):
-                text = str(text)
-            
-            text = text.lower().strip()
-            
-            # Quick pattern matching for common responses
-            if any(word in text for word in ['great', 'good', 'fantastic', 'amazing', 'wonderful']):
-                return {
-                    'emotional_state': 'positive',
-                    'energy_level': 'high',
-                    'planning_type': 'weekly',
-                    'support_needed': 'low',
-                    'key_emotions': ['positive', 'energetic'],
-                    'recommended_approach': 'ambitious'
-                }
-            elif any(word in text for word in ['okay', 'fine', 'alright', 'not bad']):
-                return {
-                    'emotional_state': 'neutral',
-                    'energy_level': 'medium',
-                    'planning_type': 'flexible',
-                    'support_needed': 'medium',
-                    'key_emotions': ['neutral'],
-                    'recommended_approach': 'balanced'
-                }
-            elif any(word in text for word in ['tired', 'exhausted', 'overwhelmed', 'stressed', 'burnt out', 'burnout']):
-                return {
-                    'emotional_state': 'overwhelmed',
-                    'energy_level': 'low',
-                    'planning_type': 'minimal',
-                    'support_needed': 'high',
-                    'key_emotions': ['overwhelmed', 'exhausted'],
-                    'recommended_approach': 'supportive'
-                }
-            
-            # Default to neutral if no patterns match
-            return {
-                'emotional_state': 'neutral',
-                'energy_level': 'medium',
-                'planning_type': 'flexible',
-                'support_needed': 'medium',
-                'key_emotions': ['neutral'],
-                'recommended_approach': 'balanced'
-            }
-            
-        except Exception as e:
-            logger.error(f"Error analyzing daily check-in: {str(e)}")
-            return {
-                'emotional_state': 'neutral',
-                'energy_level': 'medium',
-                'planning_type': 'daily',
-                'support_needed': 'medium',
-                'key_emotions': ['neutral'],
-                'recommended_approach': 'flexible'
             }
 
     def generate_daily_response(self, user, sentiment_data):
