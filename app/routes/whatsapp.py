@@ -331,6 +331,8 @@ def handle_message(user_id: str, message_text: str, instance_id: str, services: 
             handle_weekly_reflection(user_id, message_text, instance_id, services, context)
         elif current_state == 'WEEKLY_TASK_INPUT':
             handle_weekly_task_input(user_id, message_text, instance_id, services, context)
+        elif current_state == 'DAILY_TASK_INPUT':
+            handle_daily_task_input(user_id, message_text, instance_id, services, context)
         elif current_state == 'SMALL_TASK_FOCUS':
             logger.info(f"Handling small task input: {message_text}")
             try:
@@ -1179,8 +1181,8 @@ def handle_daily_task_input(user_id: str, message_text: str, instance_id: str, s
         tasks = []
         lines = message_text.strip().split('\n')
         for line in lines:
-            # Remove any numbering and leading/trailing whitespace
-            task = re.sub(r'^\d+\.\s*', '', line).strip()
+            # Remove any numbering, invisible characters, and leading/trailing whitespace
+            task = re.sub(r'^\d+\.?\s*⁠?\s*', '', line).strip()
             if task:
                 tasks.append({
                     'task': task,
@@ -1201,6 +1203,7 @@ def handle_daily_task_input(user_id: str, message_text: str, instance_id: str, s
         
         # Store the tasks
         try:
+            logger.info(f"Storing tasks for user {user_id}: {tasks}")
             services['task'].store_daily_tasks(user_id, tasks, instance_id)
             
             # Format tasks for display
@@ -1231,6 +1234,7 @@ def handle_daily_task_input(user_id: str, message_text: str, instance_id: str, s
                 instance_id,
                 context_updates
             )
+            logger.info(f"Successfully stored tasks and updated state for user {user_id}")
             
         except Exception as e:
             logger.error(f"Error storing daily tasks: {str(e)}")
