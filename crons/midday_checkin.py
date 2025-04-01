@@ -116,12 +116,9 @@ def send_midday_checkin():
                     for i, task in enumerate(incomplete_tasks, 1):
                         task_message = (
                             f"Task {i}: {task['task']}\n\n"
-                            "How's this going? Use:\n"
-                            "• DONE to mark as complete\n"
-                            "• PROGRESS to mark as in progress\n"
-                            "• STUCK if you need help"
+                            "How's this going?"
                         )
-                        whatsapp_service.send_interactive_message(
+                        whatsapp_service.send_interactive_buttons(
                             user.user_id,
                             task_message,
                             [
