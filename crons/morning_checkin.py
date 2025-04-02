@@ -95,16 +95,17 @@ def send_morning_checkin():
                     f"Planning Type: {user.planning_type}"
                 )
                 
+                # TODO: TESTING MODE - Re-enable this block when system is ready for production
                 # Check if user already received check-in today
-                last_checkin = user.last_checkin
-                if last_checkin:
-                    last_checkin_date = datetime.fromtimestamp(last_checkin).date()
-                    if last_checkin_date == datetime.now().date():
-                        logger.info(
-                            f"User {user.user_id} already received check-in today at "
-                            f"{datetime.fromtimestamp(last_checkin).strftime('%H:%M:%S')}"
-                        )
-                        continue
+                # last_checkin = user.last_checkin
+                # if last_checkin:
+                #     last_checkin_date = datetime.fromtimestamp(last_checkin).date()
+                #     if last_checkin_date == datetime.now().date():
+                #         logger.info(
+                #             f"User {user.user_id} already received check-in today at "
+                #             f"{datetime.fromtimestamp(last_checkin).strftime('%H:%M:%S')}"
+                #         )
+                #         continue
                 
                 # If user is in weekly reflection, check how long they've been in this state
                 if user.state == User.STATE_WEEKLY_REFLECTION:
