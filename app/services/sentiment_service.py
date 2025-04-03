@@ -74,17 +74,36 @@ Please provide the analysis in JSON format."""
                         json_end = content.rfind('}') + 1
                         if json_start >= 0 and json_end > json_start:
                             json_str = content[json_start:json_end]
-                            analysis = json.loads(json_str)
-                            logger.info(f"Successfully parsed sentiment analysis: {analysis}")
+                            parsed_response = json.loads(json_str)
+                            
+                            # Extract analysis from nested structure
+                            analysis = parsed_response.get('analysis', {})
+                            logger.info(f"Extracted analysis: {analysis}")
                             
                             # Map the API response to our expected format
-                            return {
-                                'emotional_state': analysis.get('sentiment', 'neutral'),
-                                'energy_level': analysis.get('energy_level', 'medium'),
-                                'support_needed': 'high' if analysis.get('stress_level') == 'high' else 'medium',
-                                'key_emotions': analysis.get('emotions', ['neutral']),
-                                'recommended_approach': 'supportive' if analysis.get('stress_level') == 'high' or analysis.get('sentiment') == 'negative' else 'flexible'
+                            emotional_state = analysis.get('overall_sentiment', 'neutral')
+                            energy_level = analysis.get('energy_level', 'medium')
+                            stress_level = analysis.get('stress_level', 'medium')
+                            key_emotions = analysis.get('key_emotions', ['neutral'])
+                            
+                            # Determine support needed based on multiple factors
+                            support_needed = 'high' if (
+                                stress_level == 'high' or
+                                emotional_state == 'negative' or
+                                analysis.get('executive_function_indicators') == 'struggling' or
+                                any(emotion in ['depression', 'hopelessness', 'anxiety', 'overwhelmed'] for emotion in key_emotions)
+                            ) else 'medium'
+                            
+                            result = {
+                                'emotional_state': emotional_state,
+                                'energy_level': energy_level,
+                                'support_needed': support_needed,
+                                'key_emotions': key_emotions,
+                                'recommended_approach': 'supportive' if support_needed == 'high' else 'flexible'
                             }
+                            
+                            logger.info(f"Final sentiment analysis result: {result}")
+                            return result
                         
                     except Exception as e:
                         logger.error(f"Failed to parse DeepSeek response: {content}")
@@ -335,30 +354,54 @@ Return the analysis in this exact JSON format:
 
     def generate_weekly_response(self, analysis: Dict[str, Any], user_name: str) -> Dict[str, str]:
         """Generate a response for the weekly check-in based on sentiment analysis."""
-        emotional_state = analysis.get('emotional_state', 'okay')
+        emotional_state = analysis.get('emotional_state', 'neutral')
         energy_level = analysis.get('energy_level', 'medium')
-        needs_support = analysis.get('needs_support', False)
-        emotions = analysis.get('emotions', [])
+        support_needed = analysis.get('support_needed', 'medium')
+        key_emotions = analysis.get('key_emotions', [])
+        
+        # Handle depression and severe negative states
+        if emotional_state == 'negative' or any(emotion in ['depression', 'hopelessness', 'anxiety'] for emotion in key_emotions):
+            response = (
+                f"I hear you, {user_name}, and I want you to know that it's completely valid to feel this way. 💜\n\n"
+                "Would you prefer to:\n"
+                "1. Take things day by day with more frequent check-ins and support\n"
+                "2. Have a gentle conversation about what you're experiencing\n"
+                "3. Focus on just one small, manageable goal for now"
+            )
+            return {
+                'message': response,
+                'planning_type': 'daily'
+            }
         
         # Handle exhaustion and overwhelm
-        if 'exhausted' in emotions or energy_level == 'low' or emotional_state == 'overwhelmed':
-            response = f"I hear you, {user_name}. Mental exhaustion is really tough, and it's completely valid to feel this way. Let's break things down into smaller, more manageable pieces. For this week, we'll focus on daily check-ins to provide more support and flexibility. How does that sound?"
+        elif energy_level == 'low' or 'exhausted' in key_emotions or 'overwhelmed' in key_emotions:
+            response = (
+                f"I understand, {user_name}. It sounds like you could use some extra support and flexibility right now. "
+                "Let's break things down into smaller, more manageable pieces. Would you like to try daily check-ins? "
+                "That way we can adjust based on your energy and capacity each day."
+            )
             return {
                 'message': response,
                 'planning_type': 'daily'
             }
             
         # Handle moderate stress/fatigue
-        elif 'tired' in emotions or energy_level == 'medium':
-            response = f"Thanks for sharing how you're feeling, {user_name}. It sounds like you could use some extra support right now. Would you like to try daily check-ins this week? We can adjust the pace and tasks based on your energy levels each day."
+        elif support_needed == 'high' or 'stressed' in key_emotions:
+            response = (
+                f"Thank you for sharing how you're feeling, {user_name}. It sounds like you might benefit from some additional support. "
+                "Would you like to try planning day by day? We can adjust the pace and tasks based on how you're feeling each day."
+            )
             return {
                 'message': response,
                 'planning_type': 'daily'
             }
             
-        # Handle okay/good state
+        # Handle neutral/positive state
         else:
-            response = f"Thanks for checking in, {user_name}! It seems like you're in a good space to plan for the week ahead. Would you like to set up your weekly tasks now?"
+            response = (
+                f"Thanks for checking in, {user_name}! Would you like to plan for the week ahead? "
+                "We can set up your tasks in a way that works best for you."
+            )
             return {
                 'message': response,
                 'planning_type': 'weekly'
