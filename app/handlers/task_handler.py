@@ -1,3 +1,4 @@
+from datetime import datetime
 import logging
 import re
 import random
@@ -111,4 +112,109 @@ class TaskHandler:
             return (
                 f"Here's where things stand:\n\n{task_list}\n\n"
                 f"You've completed {completed}/{len(tasks)} tasks - that's progress to be proud of! How are you feeling about the rest? Anything I can help with?"
+            )
+            
+    def handle_action_button(self, user_id: str, button_id: str, instance_id: str, context: dict):
+        """Handle task, journal, and action button responses."""
+        try:
+            logger.info(f"Processing action button {button_id} for user {user_id}")
+            
+            # Get user info
+            user = User.get_or_create(user_id, instance_id)
+            if not user:
+                logger.error(f"Failed to get/create user {user_id}")
+                return
+                
+            name = user.name.split('_')[0] if user.name and '_' in user.name else (user.name or "Friend")
+            
+            # Handle task-related buttons
+            if button_id.startswith('task_'):
+                action = button_id.split('_')[1]
+                if action == 'list':
+                    response = self.handle_tasks_list(user_id, instance_id, context)
+                    self.whatsapp.send_message(user_id, response)
+                elif action == 'add':
+                    self.whatsapp.send_message(
+                        user_id,
+                        "What task would you like to add? Please describe it in a single message."
+                    )
+                    self.task.update_user_state(user_id, 'TASK_INPUT', instance_id)
+                elif action == 'remove':
+                    tasks = self.task.get_daily_tasks(user_id, instance_id)
+                    if not tasks:
+                        self.whatsapp.send_message(
+                            user_id,
+                            "You don't have any tasks to remove right now."
+                        )
+                        return
+                    
+                    task_list = "\n".join([f"{i}. {task['task']}" for i, task in enumerate(tasks, 1)])
+                    self.whatsapp.send_message(
+                        user_id,
+                        f"Which task would you like to remove? Reply with the number:\n\n{task_list}"
+                    )
+                    self.task.update_user_state(user_id, 'TASK_REMOVE', instance_id)
+            
+            # Handle journal-related buttons
+            elif button_id.startswith('journal_'):
+                action = button_id.split('_')[1]
+                if action == 'reflect':
+                    self.whatsapp.send_message(
+                        user_id,
+                        f"I'd love to hear your thoughts, {name}. What's on your mind?"
+                    )
+                    self.task.update_user_state(user_id, 'JOURNAL_ENTRY', instance_id)
+                elif action == 'gratitude':
+                    self.whatsapp.send_message(
+                        user_id,
+                        f"What's something you're grateful for today, {name}? It can be something small or significant."
+                    )
+                    self.task.update_user_state(user_id, 'GRATITUDE_ENTRY', instance_id)
+                elif action == 'progress':
+                    self.whatsapp.send_message(
+                        user_id,
+                        f"What progress or achievement would you like to celebrate today, {name}? Remember, even small steps count!"
+                    )
+                    self.task.update_user_state(user_id, 'PROGRESS_ENTRY', instance_id)
+            
+            # Handle general action buttons
+            elif button_id.startswith('action_'):
+                action = button_id.split('_')[1]
+                if action == 'break':
+                    self.whatsapp.send_message(
+                        user_id,
+                        f"Taking a break is important, {name}. Would you like some suggestions for quick, refreshing activities?"
+                    )
+                    self.task.update_user_state(user_id, 'BREAK_SUGGESTIONS', instance_id)
+                elif action == 'help':
+                    self.whatsapp.send_message(
+                        user_id,
+                        "Here are the commands you can use:\n"
+                        "• TASKS - View your current tasks\n"
+                        "• DONE [number] - Mark a task as complete\n"
+                        "• PROGRESS [number] - Mark a task as in progress\n"
+                        "• STUCK [number] - Let me know if you need help\n"
+                        "• ADD [task] - Add a new task\n"
+                        "• REMOVE [number] - Remove a task\n"
+                        "• JOURNAL - Write a journal entry"
+                    )
+                elif action == 'support':
+                    self.whatsapp.send_interactive_buttons(
+                        user_id,
+                        "What kind of support would help you right now?",
+                        [
+                            {"id": "talk_feelings", "title": "Talk feelings"},
+                            {"id": "small_task", "title": "Try small task"},
+                            {"id": "self_care", "title": "Self-care day"}
+                        ]
+                    )
+                    self.task.update_user_state(user_id, 'AWAITING_SUPPORT_CHOICE', instance_id)
+            
+            logger.info(f"Successfully processed action button for user {user_id}")
+            
+        except Exception as e:
+            logger.error(f"Error handling action button: {str(e)}", exc_info=True)
+            self.whatsapp.send_message(
+                user_id,
+                "I had trouble processing your choice. Could you try selecting an option again?"
             ) 
