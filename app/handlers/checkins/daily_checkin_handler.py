@@ -8,7 +8,7 @@ from app.services.sentiment_service import SentimentService
 logger = logging.getLogger(__name__)
 
 class DailyCheckinHandler:
-    """Handler for daily check-in flow."""
+    """Handler for daily check-ins and task management."""
     
     def __init__(self, whatsapp_service, task_service, sentiment_service):
         self.whatsapp = whatsapp_service
@@ -90,7 +90,7 @@ class DailyCheckinHandler:
                 "I encountered an error processing your check-in. Let's try again - how are you feeling?"
             )
             
-    def handle_daily_task_input(self, user_id: str, message_text: str, instance_id: str, context: dict):
+    def handle_daily_task_input(self, user_id: str, message_text: str, instance_id: str, context: dict) -> None:
         """Handle daily task list input from user."""
         try:
             logger.info(f"Processing daily task input for user {user_id}")
@@ -178,4 +178,65 @@ class DailyCheckinHandler:
                 "1. [Your first task]\n"
                 "2. [Your second task]\n"
                 "3. [Your third task]"
+            )
+            
+    def handle_support_choice(self, message_text: str, user_id: str, instance_id: str, context: dict) -> None:
+        """Handle user's choice when they're feeling overwhelmed or need support."""
+        try:
+            # Get user info
+            user = User.get_or_create(user_id, instance_id)
+            if not user:
+                logger.error(f"Failed to get/create user {user_id}")
+                return
+                
+            name = user.name.split('_')[0] if user.name and '_' in user.name else (user.name or "Friend")
+            
+            # Handle button response
+            if (isinstance(message_text, dict) and 
+                message_text.get('type') == 'interactive' and 
+                message_text.get('interactive', {}).get('type') == 'button_reply'):
+                
+                button_id = message_text['interactive']['button_reply']['id']
+                
+                if button_id == 'self_care':
+                    response = (
+                        f"Taking a self-care day is a wise choice, {name}. 💙\n\n"
+                        "Remember, rest is productive too. It helps you recharge and come back stronger.\n\n"
+                        "Would you like some gentle self-care suggestions for today?"
+                    )
+                    self.task.update_user_state(user_id, 'SELF_CARE_DAY', instance_id)
+                    
+                elif button_id == 'talk_feelings':
+                    response = (
+                        f"I'm here to listen, {name}. Sometimes just talking about what's on your mind can help.\n\n"
+                        "What's been weighing on you?"
+                    )
+                    self.task.update_user_state(user_id, 'THERAPEUTIC_CONVERSATION', instance_id)
+                    
+                elif button_id == 'small_task':
+                    response = (
+                        f"That's a great approach, {name}! Small steps can make a big difference.\n\n"
+                        "What's one tiny task you feel you could manage today? It could be as simple as making your bed or drinking a glass of water."
+                    )
+                    self.task.update_user_state(user_id, 'SMALL_TASK_INPUT', instance_id)
+                    
+                self.whatsapp.send_message(user_id, response)
+                
+            else:
+                # Default response if not a button interaction
+                self.whatsapp.send_interactive_buttons(
+                    user_id,
+                    f"I understand you're feeling overwhelmed, {name}. Let's handle this together. What would help you most right now?",
+                    [
+                        {"id": "self_care", "title": "Take a self-care day"},
+                        {"id": "talk_feelings", "title": "Talk about feelings"},
+                        {"id": "small_task", "title": "Pick a small task"}
+                    ]
+                )
+                
+        except Exception as e:
+            logger.error(f"Error handling support choice: {str(e)}", exc_info=True)
+            self.whatsapp.send_message(
+                user_id,
+                "I'm having trouble processing your choice. Could you try selecting an option again?"
             ) 

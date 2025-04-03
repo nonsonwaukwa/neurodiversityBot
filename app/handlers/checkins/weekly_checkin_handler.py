@@ -40,30 +40,10 @@ class WeeklyCheckinHandler:
                 logger.info(f"Received button response: {button_response}")
                 
                 if button_response['id'] == 'weekly':
-                    # User chose weekly planning
-                    context_updates['planning_type'] = 'weekly'
-                    response = (
-                        "Let's plan your tasks for the upcoming week. Please reply with your tasks in this format:\n\n"
-                        "Monday: Task 1, Task 2, Task 3\n"
-                        "Tuesday: Task 1, Task 2, Task 3\n"
-                        "Wednesday: Task 1, Task 2, Task 3\n"
-                        "Thursday: Task 1, Task 2, Task 3\n"
-                        "Friday: Task 1, Task 2, Task 3"
-                    )
-                    self.whatsapp.send_message(user_id, response)
-                    self.task.update_user_state(user_id, 'WEEKLY_TASK_INPUT', instance_id, context_updates)
+                    self._handle_weekly_planning_choice(user_id, name, instance_id, context_updates)
                     return
-                    
                 elif button_response['id'] == 'daily':
-                    # User chose daily planning
-                    context_updates['planning_type'] = 'daily'
-                    response = (
-                        f"Great choice! I'll be here every morning to help you set your daily tasks. "
-                        "No pressure—just a little nudge to help you stay on track. "
-                        "Looking forward to planning with you each day! 😊"
-                    )
-                    self.whatsapp.send_message(user_id, response)
-                    self.task.update_user_state(user_id, 'DAILY_CHECK_IN', instance_id, context_updates)
+                    self._handle_daily_planning_choice(user_id, name, instance_id, context_updates)
                     return
             
             # Handle text message for sentiment analysis
@@ -114,7 +94,32 @@ class WeeklyCheckinHandler:
                 user_id,
                 "I encountered an error processing your reflection. Let's try again - how was your week?"
             )
-            
+
+    def _handle_weekly_planning_choice(self, user_id: str, name: str, instance_id: str, context_updates: dict) -> None:
+        """Handle when user chooses weekly planning."""
+        context_updates['planning_type'] = 'weekly'
+        response = (
+            "Let's plan your tasks for the upcoming week. Please reply with your tasks in this format:\n\n"
+            "Monday: Task 1, Task 2, Task 3\n"
+            "Tuesday: Task 1, Task 2, Task 3\n"
+            "Wednesday: Task 1, Task 2, Task 3\n"
+            "Thursday: Task 1, Task 2, Task 3\n"
+            "Friday: Task 1, Task 2, Task 3"
+        )
+        self.whatsapp.send_message(user_id, response)
+        self.task.update_user_state(user_id, 'WEEKLY_TASK_INPUT', instance_id, context_updates)
+
+    def _handle_daily_planning_choice(self, user_id: str, name: str, instance_id: str, context_updates: dict) -> None:
+        """Handle when user chooses daily planning."""
+        context_updates['planning_type'] = 'daily'
+        response = (
+            f"Great choice! I'll be here every morning to help you set your daily tasks. "
+            "No pressure—just a little nudge to help you stay on track. "
+            "Looking forward to planning with you each day! 😊"
+        )
+        self.whatsapp.send_message(user_id, response)
+        self.task.update_user_state(user_id, 'DAILY_CHECK_IN', instance_id, context_updates)
+
     def handle_weekly_task_input(self, user_id: str, message_text: str, instance_id: str, context: dict) -> None:
         """Handle weekly task input after reflection."""
         try:
