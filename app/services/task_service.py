@@ -593,26 +593,15 @@ class TaskService:
         try:
             logger.info(f"[STORE_WEEKLY] Starting to store weekly tasks for user {user_id}")
             
-            # Format tasks with status
-            formatted_tasks = {}
-            for day, tasks in tasks_by_day.items():
-                formatted_tasks[day] = [
-                    {
-                        'task': task,
-                        'status': 'pending',
-                        'created_at': int(time.time())
-                    }
-                    for task in tasks
-                ]
-            
-            logger.info(f"[STORE_WEEKLY] Formatted tasks: {formatted_tasks}")
+            # Tasks are already formatted with status, just store them as is
+            logger.info(f"[STORE_WEEKLY] Formatted tasks: {tasks_by_day}")
             
             # Store in unified collection
             logger.info(f"[STORE_WEEKLY] Storing in unified collection /users/{user_id}/weekly_tasks/")
             user_ref = self.db.collection('users').document(user_id)
             weekly_tasks_ref = user_ref.collection('weekly_tasks').document()
             weekly_tasks_ref.set({
-                'tasks': formatted_tasks,
+                'tasks': tasks_by_day,
                 'created_at': int(time.time()),
                 'week_starting': self._get_week_start_timestamp(),
                 'instance_id': instance_id,
@@ -624,7 +613,7 @@ class TaskService:
             logger.info(f"[STORE_WEEKLY] Storing in instance collection /instances/{instance_id}/users/{user_id}")
             instance_user_ref = self.db.collection('instances').document(instance_id).collection('users').document(user_id)
             instance_user_ref.update({
-                'weekly_tasks': formatted_tasks,
+                'weekly_tasks': tasks_by_day,
                 'last_weekly_planning': int(time.time()),
                 'planning_type': 'weekly'
             })

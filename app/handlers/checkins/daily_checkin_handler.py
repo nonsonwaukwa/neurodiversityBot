@@ -14,6 +14,27 @@ class DailyCheckinHandler:
         self.whatsapp = whatsapp_service
         self.task = task_service
         self.sentiment = sentiment_service
+        # Message deduplication cache
+        self._message_cache = {}
+        
+    def _is_duplicate_message(self, message_id: str, user_id: str) -> bool:
+        """Check if a message has already been processed."""
+        cache_key = f"{user_id}:{message_id}"
+        if cache_key in self._message_cache:
+            logger.info(f"Duplicate message detected: {message_id} for user {user_id}")
+            return True
+        self._message_cache[cache_key] = int(time.time())
+        return False
+        
+    def _clean_message_cache(self):
+        """Remove messages older than 5 minutes from the cache."""
+        current_time = int(time.time())
+        expired_keys = [
+            key for key, timestamp in self._message_cache.items()
+            if current_time - timestamp > 300  # 5 minutes in seconds
+        ]
+        for key in expired_keys:
+            del self._message_cache[key]
         
     def handle_daily_checkin(self, user_id: str, message_text: str, instance_id: str, context: dict) -> None:
         """Handle daily check-in flow."""
@@ -91,8 +112,18 @@ class DailyCheckinHandler:
             )
             
     def handle_daily_task_input(self, user_id: str, message_text: str, instance_id: str, context: dict) -> None:
-        """Handle daily task list input from user."""
+        """Handle daily task input."""
         try:
+            # Clean old cache entries
+            self._clean_message_cache()
+            
+            # Check for duplicate message if it's an interactive message
+            if isinstance(message_text, dict):
+                message_id = message_text.get('message_id')
+                if message_id and self._is_duplicate_message(message_id, user_id):
+                    logger.info(f"Skipping duplicate message {message_id} for user {user_id}")
+                    return
+            
             logger.info(f"Processing daily task input for user {user_id}")
             logger.info(f"Task input: {message_text}")
             
@@ -239,4 +270,24 @@ class DailyCheckinHandler:
             self.whatsapp.send_message(
                 user_id,
                 "I'm having trouble processing your choice. Could you try selecting an option again?"
+            )
+            
+    def handle_daily_reflection(self, user_id: str, message_text: str, instance_id: str, context: dict) -> None:
+        """Handle daily reflection."""
+        try:
+            # Clean old cache entries
+            self._clean_message_cache()
+            
+            # Check for duplicate message if it's an interactive message
+            if isinstance(message_text, dict):
+                message_id = message_text.get('message_id')
+                if message_id and self._is_duplicate_message(message_id, user_id):
+                    logger.info(f"Skipping duplicate message {message_id} for user {user_id}")
+                    return
+                    
+        except Exception as e:
+            logger.error(f"Error in daily reflection: {str(e)}", exc_info=True)
+            self.whatsapp.send_message(
+                user_id,
+                "I encountered an error processing your reflection. Let's try again."
             ) 

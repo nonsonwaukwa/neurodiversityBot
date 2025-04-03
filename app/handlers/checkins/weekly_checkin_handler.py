@@ -13,10 +13,41 @@ class WeeklyCheckinHandler:
         self.whatsapp = whatsapp_service
         self.task = task_service
         self.sentiment = sentiment_service
+        # Message deduplication cache
+        self._message_cache = {}
         
+    def _is_duplicate_message(self, message_id: str, user_id: str) -> bool:
+        """Check if a message has already been processed."""
+        cache_key = f"{user_id}:{message_id}"
+        if cache_key in self._message_cache:
+            logger.info(f"Duplicate message detected: {message_id} for user {user_id}")
+            return True
+        self._message_cache[cache_key] = int(time.time())
+        return False
+        
+    def _clean_message_cache(self):
+        """Remove messages older than 5 minutes from the cache."""
+        current_time = int(time.time())
+        expired_keys = [
+            key for key, timestamp in self._message_cache.items()
+            if current_time - timestamp > 300  # 5 minutes in seconds
+        ]
+        for key in expired_keys:
+            del self._message_cache[key]
+            
     def handle_weekly_reflection(self, user_id: str, message_text: str, instance_id: str, context: dict) -> None:
         """Handle weekly reflection flow."""
         try:
+            # Clean old cache entries
+            self._clean_message_cache()
+            
+            # Check for duplicate message if it's an interactive message
+            if isinstance(message_text, dict):
+                message_id = message_text.get('message_id')
+                if message_id and self._is_duplicate_message(message_id, user_id):
+                    logger.info(f"Skipping duplicate message {message_id} for user {user_id}")
+                    return
+            
             # Get or create user
             user = User.get_or_create(user_id, instance_id)
             if not user:
@@ -123,6 +154,16 @@ class WeeklyCheckinHandler:
     def handle_weekly_task_input(self, user_id: str, message_text: str, instance_id: str, context: dict) -> None:
         """Handle weekly task input after reflection."""
         try:
+            # Clean old cache entries
+            self._clean_message_cache()
+            
+            # Check for duplicate message if it's an interactive message
+            if isinstance(message_text, dict):
+                message_id = message_text.get('message_id')
+                if message_id and self._is_duplicate_message(message_id, user_id):
+                    logger.info(f"Skipping duplicate message {message_id} for user {user_id}")
+                    return
+            
             # Parse tasks from message
             tasks_by_day = {}
             current_day = None
@@ -137,16 +178,18 @@ class WeeklyCheckinHandler:
                 
                 if day_match:
                     current_day = line.split(':')[0].strip().title()
-                    tasks_by_day[current_day] = []
-                elif current_day:
-                    # Remove leading numbers and dots
-                    task = line.lstrip('0123456789. ')
-                    if task:
-                        tasks_by_day[current_day].append({
+                    # Get tasks part after the colon
+                    tasks_part = line.split(':', 1)[1].strip() if ':' in line else ''
+                    # Split by comma and clean each task
+                    tasks = [task.strip() for task in tasks_part.split(',') if task.strip()]
+                    tasks_by_day[current_day] = [
+                        {
                             'task': task,
                             'status': 'pending',
                             'created_at': int(time.time())
-                        })
+                        }
+                        for task in tasks
+                    ]
             
             if not tasks_by_day:
                 self.whatsapp.send_message(
