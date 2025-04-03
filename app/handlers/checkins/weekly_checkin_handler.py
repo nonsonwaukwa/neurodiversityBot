@@ -223,7 +223,7 @@ class WeeklyCheckinHandler:
                 'total_weekly_tasks': sum(len(tasks) for tasks in tasks_by_day.values())
             }
             self.task.update_user_state(
-                user_id, 'WEEKLY_REFLECTION', instance_id, context_updates
+                user_id, 'TASK_UPDATE', instance_id, context_updates
             )
             
         except Exception as e:
