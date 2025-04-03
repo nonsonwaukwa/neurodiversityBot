@@ -244,7 +244,7 @@ def handle_message(user_id: str, message_text: str, instance_id: str, services: 
         
         # Initialize handlers
         task_handler = TaskHandler(services['whatsapp'], services['task'], services['sentiment'])
-        daily_handler = DailyCheckinHandler(services['whatsapp'], services['task'])
+        daily_handler = DailyCheckinHandler(services['whatsapp'], services['task'], services['sentiment'])
         weekly_handler = WeeklyCheckinHandler(services['whatsapp'], services['task'])
         support_handler = SupportHandler(services['whatsapp'], services['task'], services['sentiment'])
         midday_handler = MiddayCheckinHandler(services['whatsapp'], services['task'], services['sentiment'], task_handler)
