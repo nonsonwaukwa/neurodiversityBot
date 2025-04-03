@@ -16,76 +16,36 @@ class SentimentService:
         if not self.api_key:
             logger.error("DEEPSEEK_API_KEY not found in environment variables")
         
-    def analyze_sentiment(self, text: str) -> Dict[str, Any]:
-        """Analyze the sentiment of the given text with special attention to neurodivergent expression patterns."""
-        headers = {
-            'Authorization': f'Bearer {self.api_key}',
-            'Content-Type': 'application/json'
-        }
-        
-        prompt = f"""Analyze the sentiment of the following text with special attention to neurodivergent expression patterns:
-
-Text: {text}
-
-Please analyze for:
-1. Overall sentiment (positive, negative, or neutral)
-2. Energy level (high, medium, low)
-3. Stress level (high, medium, low)
-4. Executive function indicators (struggling, managing, thriving)
-5. Key emotions expressed or implied
-6. Potential sensory overwhelm signals (present/not present)
-7. Communication style indicators
-
-For neurodivergent individuals, consider that:
-- Flat or brief responses might not indicate disinterest
-- Intense focus on details could indicate passion rather than anxiety
-- Direct communication isn't rudeness
-- Variable punctuation/capitalization may express emotion rather than carelessness
-
-Please provide the analysis in JSON format with these fields:
-{{
-  "sentiment": "positive/negative/neutral",
-  "energy_level": "high/medium/low",
-  "stress_level": "high/medium/low",
-  "executive_function": "struggling/managing/thriving",
-  "emotions": ["emotion1", "emotion2"],
-  "sensory_overwhelm": true/false,
-  "communication_style": "brief/detailed/direct/exploratory"
-}}"""
-
-        payload = {
-            'model': 'deepseek-chat',
-            'messages': [
-                {'role': 'system', 'content': 'You are an expert in analyzing communication patterns of neurodivergent individuals, including those with ADHD, autism, anxiety, and depression. You provide nuanced, non-judgmental analysis.'},
-                {'role': 'user', 'content': prompt}
-            ],
-            'temperature': 0.3
-        }
-        
+    def analyze_sentiment(self, text: str) -> dict:
+        """Analyze sentiment of text and return emotional state."""
         try:
-            response = requests.post(
-                self.base_url,
-                headers=headers,
-                json=payload
-            )
+            # For now using basic analysis
+            analysis = self._basic_word_analysis(text)
             
-            if response.status_code == 200:
-                result = response.json()
-                # Parse the JSON response from the model
+            # Parse the analysis into our expected format
+            if isinstance(analysis, str):
+                # Try to parse if it's a JSON string
                 try:
-                    analysis = json.loads(result['choices'][0]['message']['content'])
-                    return analysis
+                    analysis = json.loads(analysis)
                 except:
-                    # If parsing fails, return a default with a note about the failure
-                    print(f"Failed to parse sentiment analysis response: {result['choices'][0]['message']['content']}")
-                    return self._get_default_sentiment()
-            else:
-                print(f"API error ({response.status_code}): {response.text}")
-                return self._get_default_sentiment()
-        except Exception as e:
-            print(f"Exception in sentiment analysis: {str(e)}")
+                    pass
+                    
+            if isinstance(analysis, dict):
+                # Map the sentiment analysis fields to our expected format
+                return {
+                    'emotional_state': analysis.get('sentiment', 'neutral'),
+                    'energy_level': analysis.get('energy_level', 'medium'),
+                    'support_needed': 'high' if analysis.get('stress_level') == 'high' else 'medium',
+                    'key_emotions': analysis.get('emotions', ['neutral']),
+                    'recommended_approach': 'supportive' if analysis.get('stress_level') == 'high' else 'flexible'
+                }
+            
             return self._get_default_sentiment()
             
+        except Exception as e:
+            logger.error(f"Error in sentiment analysis: {str(e)}")
+            return self._get_default_sentiment()
+
     def _get_default_sentiment(self) -> Dict[str, Any]:
         """Return a default sentiment analysis with a balanced perspective."""
         default = {

@@ -56,8 +56,9 @@ class DailyCheckinHandler:
                 needs_support = (
                     analysis.get('emotional_state') == 'negative' or
                     analysis.get('energy_level') == 'low' or
-                    any(emotion in analysis.get('key_emotions', []) 
-                        for emotion in ['overwhelmed', 'anxious', 'stressed'])
+                    analysis.get('support_needed') == 'high' or
+                    'overwhelm' in analysis.get('key_emotions', []) or
+                    'stress' in analysis.get('key_emotions', [])
                 )
             else:
                 needs_support = False
@@ -72,18 +73,19 @@ class DailyCheckinHandler:
             
             if needs_support:
                 message = (
-                    f"I hear you, {name}. Let's take it one step at a time today.\n\n"
-                    "Would you like to:"
+                    f"I hear you're feeling overwhelmed and stressed, {name}. That's completely valid and it's good that you're expressing this. 🫂\n\n"
+                    "Let's take a step back and focus on your wellbeing first. Would you like to:"
                 )
                 self.whatsapp.send_interactive_buttons(
                     user_id,
                     message,
                     [
-                        {"id": "talk_feelings", "title": "Talk through feelings"},
-                        {"id": "small_task", "title": "Try small task"},
-                        {"id": "self_care", "title": "Self-care day"}
+                        {"id": "break_tasks", "title": "Break tasks into smaller steps"},
+                        {"id": "breathing_exercise", "title": "Quick breathing exercise"},
+                        {"id": "skip_tasks", "title": "Skip tasks for now"}
                     ]
                 )
+                context_updates['support_offered'] = True
                 self.task.update_user_state(
                     user_id, 'AWAITING_SUPPORT_CHOICE', instance_id, context_updates
                 )
