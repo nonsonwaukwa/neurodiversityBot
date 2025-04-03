@@ -80,12 +80,11 @@ class DailyCheckinHandler:
                     user_id,
                     message,
                     [
-                        {"id": "break_tasks", "title": "Break tasks into smaller steps"},
-                        {"id": "breathing_exercise", "title": "Quick breathing exercise"},
-                        {"id": "skip_tasks", "title": "Skip tasks for now"}
+                        {"id": "talk_feelings", "title": "Talk through feelings"},
+                        {"id": "small_task", "title": "Try small task"},
+                        {"id": "self_care", "title": "Self-care day"}
                     ]
                 )
-                context_updates['support_offered'] = True
                 self.task.update_user_state(
                     user_id, 'AWAITING_SUPPORT_CHOICE', instance_id, context_updates
                 )
