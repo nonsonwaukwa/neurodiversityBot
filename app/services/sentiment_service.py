@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 class SentimentService:
     def __init__(self):
         self.api_key = os.getenv('DEEPSEEK_API_KEY')
-        self.base_url = 'https://api.deepseek.ai/v1/chat/completions'
+        self.base_url = 'https://api.deepseek.com/v1/chat/completions'
         if not self.api_key:
             logger.error("DEEPSEEK_API_KEY not found in environment variables")
         
