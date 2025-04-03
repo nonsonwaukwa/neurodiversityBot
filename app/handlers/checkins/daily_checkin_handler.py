@@ -80,7 +80,7 @@ class DailyCheckinHandler:
                     user_id,
                     message,
                     [
-                        {"id": "talk_feelings", "title": "Talk through feelings"},
+                        {"id": "talk_feelings", "title": "Talk feelings"},
                         {"id": "small_task", "title": "Try small task"},
                         {"id": "self_care", "title": "Self-care day"}
                     ]
