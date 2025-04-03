@@ -296,6 +296,62 @@ class DailyCheckinHandler:
                 user_id,
                 "I'm having trouble processing your choice. Could you try selecting an option again?"
             )
+
+    def handle_small_task_input(self, user_id: str, message_text: str, instance_id: str, context: dict) -> None:
+        """Handle small task input when user is feeling overwhelmed."""
+        try:
+            logger.info(f"Processing small task input for user {user_id}")
+            
+            # Get user info
+            user = User.get_or_create(user_id, instance_id)
+            if not user:
+                logger.error(f"Failed to get/create user {user_id}")
+                return
+                
+            name = user.name.split('_')[0] if user.name and '_' in user.name else (user.name or "Friend")
+            
+            # Store the task
+            task_data = {
+                'task': message_text,
+                'status': 'pending',
+                'created_at': int(time.time()),
+                'type': 'small_task'
+            }
+            
+            try:
+                self.task.store_daily_tasks(user_id, [task_data], instance_id)
+                
+                # Generate empathetic response
+                response = (
+                    "That's perfect - getting enough rest is so important, especially when things feel overwhelming. 💜\n\n"
+                    "I've noted this as your focus for today. Remember, it's completely okay to take things slow and "
+                    "prioritize your wellbeing. I'll check in with you later to see how you're doing.\n\n"
+                    "Is there anything else you need support with?"
+                )
+                
+                # Send response and update state
+                self.whatsapp.send_message(user_id, response)
+                
+                # Update context with the task
+                context_updates = {
+                    'daily_tasks': [task_data],
+                    'last_task_update': int(time.time())
+                }
+                self.task.update_user_state(user_id, 'DAILY_CHECK_IN', instance_id, context_updates)
+                
+            except Exception as e:
+                logger.error(f"Error storing small task: {str(e)}")
+                self.whatsapp.send_message(
+                    user_id,
+                    "I'm having trouble saving your task. Could you try sharing it with me again?"
+                )
+                
+        except Exception as e:
+            logger.error(f"Error processing small task input: {str(e)}", exc_info=True)
+            self.whatsapp.send_message(
+                user_id,
+                "I had trouble understanding your task. Could you try sharing it again?"
+            )
             
     def handle_daily_reflection(self, user_id: str, message_text: str, instance_id: str, context: dict) -> None:
         """Handle daily reflection."""

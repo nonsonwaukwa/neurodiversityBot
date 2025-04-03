@@ -285,36 +285,8 @@ def handle_message(user_id: str, message_text: str, instance_id: str, services: 
             # Handle small task input state
             if current_state == 'SMALL_TASK_INPUT':
                 logger.info(f"Processing small task input: {message_text}")
-                try:
-                    # Store the task
-                    task_data = {
-                        'task': message_text,
-                        'status': 'pending',
-                        'timestamp': int(time.time()),
-                        'type': 'small_task'
-                    }
-                    services['task'].store_daily_task(user_id, task_data, instance_id)
-                    
-                    # Generate empathetic response
-                    response = (
-                        "That's perfect - getting enough rest is so important, especially when things feel overwhelming. 💜\n\n"
-                        "I've noted this as your focus for today. Remember, it's completely okay to take things slow and "
-                        "prioritize your wellbeing. I'll check in with you later to see how you're doing.\n\n"
-                        "Is there anything else you need support with?"
-                    )
-                    
-                    # Send response and update state
-                    services['whatsapp'].send_message(user_id, response)
-                    services['task'].update_user_state(user_id, 'DAILY_CHECK_IN', instance_id)
-                    return
-                    
-                except Exception as e:
-                    logger.error(f"Error processing small task: {str(e)}")
-                    services['whatsapp'].send_message(
-                        user_id,
-                        "I'm having trouble saving your task. Could you try sharing it with me again?"
-                    )
-                    return
+                daily_handler.handle_small_task_input(user_id, message_text, instance_id, context)
+                return
         
         # Route regular messages based on state
         if current_state == 'THERAPEUTIC_CONVERSATION':
