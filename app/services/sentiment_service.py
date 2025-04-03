@@ -12,39 +12,96 @@ logger = logging.getLogger(__name__)
 class SentimentService:
     def __init__(self):
         self.api_key = os.getenv('DEEPSEEK_API_KEY')
-        self.base_url = 'https://api.deepseek.com/v1/chat/completions'
+        self.base_url = 'https://api.deepseek.ai/v1/chat/completions'
         if not self.api_key:
             logger.error("DEEPSEEK_API_KEY not found in environment variables")
         
     def analyze_sentiment(self, text: str) -> dict:
         """Analyze sentiment of text and return emotional state."""
         try:
-            # For now using basic analysis
-            analysis = self._basic_word_analysis(text)
+            if not self.api_key:
+                logger.error("No DeepSeek API key available")
+                return self._basic_word_analysis(text)
+
+            headers = {
+                'Authorization': f'Bearer {self.api_key}',
+                'Content-Type': 'application/json'
+            }
             
-            # Parse the analysis into our expected format
-            if isinstance(analysis, str):
-                # Try to parse if it's a JSON string
-                try:
-                    analysis = json.loads(analysis)
-                except:
-                    pass
+            prompt = f"""Analyze the sentiment of the following text with special attention to neurodivergent expression patterns:
+
+Text: {text}
+
+Please analyze for:
+1. Overall sentiment (positive, negative, or neutral)
+2. Energy level (high, medium, low)
+3. Stress level (high, medium, low)
+4. Executive function indicators (struggling, managing, thriving)
+5. Key emotions expressed or implied
+6. Potential sensory overwhelm signals (present/not present)
+7. Communication style indicators
+
+Please provide the analysis in JSON format."""
+
+            payload = {
+                'model': 'deepseek-chat',
+                'messages': [
+                    {'role': 'system', 'content': 'You are an expert in analyzing communication patterns of neurodivergent individuals, including those with ADHD, autism, anxiety, and depression. You provide nuanced, non-judgmental analysis.'},
+                    {'role': 'user', 'content': prompt}
+                ],
+                'temperature': 0.3
+            }
+            
+            try:
+                logger.info(f"Making DeepSeek API request to {self.base_url}")
+                response = requests.post(
+                    self.base_url,
+                    headers=headers,
+                    json=payload,
+                    timeout=10
+                )
+                logger.info(f"DeepSeek API response status: {response.status_code}")
+                
+                if response.status_code == 200:
+                    result = response.json()
+                    logger.info("Successfully received DeepSeek API response")
+                    try:
+                        # Extract the content from the API response
+                        content = result['choices'][0]['message']['content']
+                        logger.info(f"Raw API response content: {content}")
+                        
+                        # Find the JSON part in the content
+                        json_start = content.find('{')
+                        json_end = content.rfind('}') + 1
+                        if json_start >= 0 and json_end > json_start:
+                            json_str = content[json_start:json_end]
+                            analysis = json.loads(json_str)
+                            logger.info(f"Successfully parsed sentiment analysis: {analysis}")
+                            
+                            # Map the API response to our expected format
+                            return {
+                                'emotional_state': analysis.get('sentiment', 'neutral'),
+                                'energy_level': analysis.get('energy_level', 'medium'),
+                                'support_needed': 'high' if analysis.get('stress_level') == 'high' else 'medium',
+                                'key_emotions': analysis.get('emotions', ['neutral']),
+                                'recommended_approach': 'supportive' if analysis.get('stress_level') == 'high' or analysis.get('sentiment') == 'negative' else 'flexible'
+                            }
+                        
+                    except Exception as e:
+                        logger.error(f"Failed to parse DeepSeek response: {content}")
+                        logger.error(f"Parse error: {str(e)}")
+                        raise  # Re-raise to trigger API retry
+                else:
+                    logger.error(f"DeepSeek API error ({response.status_code}): {response.text}")
+                    raise Exception(f"API returned status code {response.status_code}")
                     
-            if isinstance(analysis, dict):
-                # Map the sentiment analysis fields to our expected format
-                return {
-                    'emotional_state': analysis.get('sentiment', 'neutral'),
-                    'energy_level': analysis.get('energy_level', 'medium'),
-                    'support_needed': 'high' if analysis.get('stress_level') == 'high' else 'medium',
-                    'key_emotions': analysis.get('emotions', ['neutral']),
-                    'recommended_approach': 'supportive' if analysis.get('stress_level') == 'high' else 'flexible'
-                }
-            
-            return self._get_default_sentiment()
-            
+            except requests.exceptions.RequestException as e:
+                logger.error(f"DeepSeek API request failed: {str(e)}")
+                raise  # Re-raise to trigger API retry
+                
         except Exception as e:
-            logger.error(f"Error in sentiment analysis: {str(e)}")
-            return self._get_default_sentiment()
+            logger.error(f"All DeepSeek API attempts failed, falling back to basic analysis: {str(e)}")
+            return self._basic_word_analysis(text)
 
     def _get_default_sentiment(self) -> Dict[str, Any]:
         """Return a default sentiment analysis with a balanced perspective."""
@@ -64,9 +121,16 @@ class SentimentService:
         
         # Simple word lists for basic analysis
         positive_words = {'great', 'good', 'happy', 'excited', 'wonderful', 'fantastic', 'amazing', 'love', 'excellent'}
-        negative_words = {'bad', 'sad', 'tired', 'exhausted', 'overwhelmed', 'stressed', 'anxious', 'worried', 'frustrated'}
+        negative_words = {
+            'bad', 'sad', 'tired', 'exhausted', 'overwhelmed', 'stressed', 'anxious', 'worried', 'frustrated',
+            'depressed', 'depression', 'hopeless', 'miserable', 'down', 'unhappy', 'struggling', 'awful',
+            'terrible', 'lost', 'alone', 'lonely', 'numb'
+        }
         high_energy_words = {'energetic', 'active', 'motivated', 'excited', 'ready', 'enthusiastic', 'pumped'}
-        low_energy_words = {'tired', 'exhausted', 'drained', 'sleepy', 'fatigued', 'lazy', 'unmotivated'}
+        low_energy_words = {
+            'tired', 'exhausted', 'drained', 'sleepy', 'fatigued', 'lazy', 'unmotivated',
+            'depressed', 'numb', 'heavy', 'sluggish', 'lethargic'
+        }
         
         # Count word occurrences
         pos_count = sum(1 for word in text.split() if word in positive_words)
@@ -91,14 +155,20 @@ class SentimentService:
             energy_level = 'medium'
             
         # Determine support needed based on negative indicators
-        support_needed = 'high' if neg_count > 2 else ('medium' if neg_count > 0 else 'low')
+        support_needed = 'high' if neg_count > 0 else ('medium' if neg_count > 0 else 'low')
+        
+        # Add depression-specific handling
+        if any(word in text for word in ['depressed', 'depression', 'hopeless', 'suicidal']):
+            emotional_state = 'negative'
+            energy_level = 'low'
+            support_needed = 'high'
         
         analysis = {
             'emotional_state': emotional_state,
             'energy_level': energy_level,
             'support_needed': support_needed,
-            'key_emotions': [],  # Would need more sophisticated analysis for emotions
-            'recommended_approach': 'flexible'
+            'key_emotions': ['depression'] if 'depress' in text else [],  # Add key emotion for depression
+            'recommended_approach': 'supportive' if support_needed == 'high' else 'flexible'
         }
         
         logger.info(f"Basic word analysis result: {analysis}")
