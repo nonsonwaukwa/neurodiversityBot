@@ -323,6 +323,8 @@ def handle_message(user_id: str, message_text: str, instance_id: str, services: 
             daily_handler.handle_daily_checkin(user_id, message_text, instance_id, context)
         elif current_state == 'WEEKLY_REFLECTION':
             weekly_handler.handle_weekly_reflection(user_id, message_text, instance_id, context)
+        elif current_state == 'WEEKLY_TASK_INPUT':
+            weekly_handler.handle_weekly_task_input(user_id, message_text, instance_id, context)
         else:
             logger.warning(f"Message received in unexpected state: {current_state}")
             services['whatsapp'].send_message(
