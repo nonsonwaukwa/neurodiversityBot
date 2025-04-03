@@ -212,30 +212,66 @@ def get_instance_id(phone_number_id: str) -> str:
 def handle_message(user_id: str, message_text: str, instance_id: str, services: dict, context: dict):
     """Handle incoming WhatsApp message."""
     try:
-        # Get handlers
-        daily_handler = services['daily_handler']
-        weekly_handler = services['weekly_handler']
-        midday_handler = services['midday_handler']
-        task_handler = services['task_handler']
-        support_handler = services['support_handler']
+        # Get user info
+        user = User.get_or_create(user_id, instance_id)
+        if not user:
+            logger.error(f"Failed to get/create user {user_id}")
+            return
+            
+        name = user.name.split('_')[0] if user.name and '_' in user.name else (user.name or "Friend")
         
-        # Get current state
-        current_state = services['task'].get_user_state(user_id, instance_id).get('state')
+        # Get user state
+        user_state = services['task'].get_user_state(user_id, instance_id)
+        current_state = user_state.get('state', 'INITIAL')
+        context = user_state.get('context', {})
+        
         logger.info(f"Current state for user {user_id}: {current_state}")
         logger.info(f"Message type: {type(message_text)}")
+        if isinstance(message_text, dict):
+            logger.info(f"Interactive message content: {message_text}")
         
-        # Handle interactive messages first
+        # Initialize handlers
+        task_handler = TaskHandler(services['whatsapp'], services['task'], services['sentiment'])
+        daily_handler = DailyCheckinHandler(services['whatsapp'], services['task'], services['sentiment'])
+        weekly_handler = WeeklyCheckinHandler(services['whatsapp'], services['task'], services['sentiment'])
+        support_handler = SupportHandler(services['whatsapp'], services['task'], services['sentiment'])
+        midday_handler = MiddayCheckinHandler(services['whatsapp'], services['task'], services['sentiment'], task_handler)
+        
+        # Handle interactive messages based on specific use cases
         if isinstance(message_text, dict) and message_text.get('type') == 'interactive':
-            # Route interactive messages based on state
+            interactive_msg = message_text.get('interactive', {})
+            button_reply = interactive_msg.get('button_reply', {})
+            
+            button_response = message_text['interactive']['button_reply']
+            button_id = button_response.get('id', '')
+            logger.info(f"Processing button response: {button_response} for state: {current_state}")
+            
+            # Use Case 1: Weekly Check-in Planning Choice
             if current_state == 'AWAITING_PLANNING_CHOICE':
+                logger.info("Handling weekly planning choice button")
                 weekly_handler.handle_weekly_reflection(user_id, message_text, instance_id, context)
                 return
-            elif current_state == 'MIDDAY_CHECK_IN':
-                midday_handler.handle_midday_button_response(user_id, message_text, instance_id, context)
+            
+            # Use Case 2: Daily Check-in Support Options
+            if current_state == 'AWAITING_SUPPORT_CHOICE':
+                logger.info("Handling daily support choice button")
+                daily_handler.handle_support_choice(message_text, user_id, instance_id, context)
                 return
-            elif current_state == 'AWAITING_SUPPORT_CHOICE':
-                support_handler.handle_support_choice(user_id, message_text, instance_id, context)
+            
+            # Use Case 3: Midday Check-in Task Status
+            if current_state == 'MIDDAY_CHECK_IN':
+                logger.info("Handling midday task status button")
+                midday_handler.handle_midday_checkin(user_id, message_text, instance_id, context)
                 return
+            
+            # Use Case 4: Action Commands Response
+            if button_id.startswith(('task_', 'journal_', 'action_')):
+                logger.info("Handling action command button")
+                task_handler.handle_action_button(user_id, button_id, instance_id, context)
+                return
+            
+            logger.warning(f"Received button response in unexpected state: {current_state}")
+            # Let it fall through to regular message handling
         
         # Handle action command keywords that trigger buttons
         if isinstance(message_text, str):
@@ -271,15 +307,14 @@ def handle_message(user_id: str, message_text: str, instance_id: str, services: 
             response = task_handler.handle_check_in(user_id, message_text, instance_id)
             services['whatsapp'].send_message(user_id, response)
         else:
-            # Default to task handler for unknown states
-            response = task_handler.handle_check_in(user_id, message_text, instance_id)
-            services['whatsapp'].send_message(user_id, response)
+            # Handle other states...
+            pass
             
     except Exception as e:
-        logger.error(f"Error handling message: {str(e)}", exc_info=True)
+        logger.error(f"Error in handle_message: {str(e)}", exc_info=True)
         services['whatsapp'].send_message(
             user_id,
-            "I encountered an error processing your message. Please try again."
+            "I encountered an error. Let's start over - how are you feeling?"
         )
 
 # For backward compatibility, redirect instance-specific routes to the main webhook
