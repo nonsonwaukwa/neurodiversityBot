@@ -4,6 +4,7 @@ import re
 from typing import Dict, Any
 from app.models.user import User
 from app.services.sentiment_service import SentimentService
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +40,7 @@ class DailyCheckinHandler:
     def handle_daily_checkin(self, user_id: str, message_text: str, instance_id: str, context: dict) -> None:
         """Handle daily check-in flow."""
         try:
-            # Get or create user
+            # Get user info
             user = User.get_or_create(user_id, instance_id)
             if not user:
                 logger.error(f"Failed to get/create user {user_id}")
@@ -47,62 +48,75 @@ class DailyCheckinHandler:
                 
             name = user.name.split('_')[0] if user.name and '_' in user.name else (user.name or "Friend")
             
-            # Analyze sentiment if message is text
-            if isinstance(message_text, str):
-                analysis = self.sentiment.analyze_checkin_text(message_text)
-                logger.info(f"Sentiment analysis for user {user_id}: {analysis}")
-                
-                needs_support = (
-                    analysis.get('emotional_state') == 'negative' or
-                    analysis.get('energy_level') == 'low' or
-                    any(emotion in analysis.get('key_emotions', []) 
-                        for emotion in ['overwhelmed', 'anxious', 'stressed'])
-                )
-            else:
-                needs_support = False
-                analysis = {}
+            # Analyze sentiment
+            analysis = self.sentiment.analyze_sentiment(message_text)
+            logger.info(f"Daily check-in sentiment analysis for user {user_id}: {analysis}")
             
-            # Store check-in data
+            # Initialize context updates
             context_updates = {
                 'last_check_in': int(time.time()),
-                'last_sentiment': analysis,
-                'check_in_type': 'daily'
+                'emotional_state': analysis.get('emotional_state', 'neutral'),
+                'energy_level': analysis.get('energy_level', 'medium')
             }
             
-            if needs_support:
-                message = (
-                    f"I hear you, {name}. Let's take it one step at a time today.\n\n"
-                    "Would you like to:"
-                )
-                self.whatsapp.send_interactive_buttons(
-                    user_id,
-                    message,
-                    [
-                        {"id": "talk_feelings", "title": "Talk through feelings"},
-                        {"id": "small_task", "title": "Try small task"},
-                        {"id": "self_care", "title": "Self-care day"}
-                    ]
-                )
-                self.task.update_user_state(
-                    user_id, 'AWAITING_SUPPORT_CHOICE', instance_id, context_updates
-                )
+            # Get today's tasks from weekly plan if using weekly planning
+            if context.get('planning_type') == 'weekly':
+                today = datetime.now().strftime('%A')
+                tasks = self.task.get_weekly_tasks(user_id, instance_id, today)
+                
+                if tasks:
+                    task_list = "\n".join([f"{i}. {task['task']}" for i, task in enumerate(tasks, 1)])
+                    response = (
+                        f"Thanks for checking in, {name}! Here are your tasks for {today}:\n\n"
+                        f"{task_list}\n\n"
+                        "You can update your tasks using these commands:\n"
+                        "• DONE [number] - Mark a task as complete\n"
+                        "• PROGRESS [number] - Mark a task as in progress\n"
+                        "• STUCK [number] - Let me know if you need help\n"
+                        "• ADD [task] - Add a new task\n"
+                        "• REMOVE [number] - Remove a task"
+                    )
+                    self.whatsapp.send_message(user_id, response)
+                    self.task.update_user_state(user_id, 'TASK_UPDATE', instance_id, context_updates)
+                else:
+                    response = (
+                        f"Good morning {name}! I don't see any tasks planned for {today}. "
+                        "Would you like to set some tasks for today?"
+                    )
+                    self.whatsapp.send_message(user_id, response)
+                    self.task.update_user_state(user_id, 'DAILY_TASK_INPUT', instance_id, context_updates)
             else:
-                # User is feeling good, ask for tasks
-                message = (
-                    f"Great energy, {name}! Let's plan your tasks for today.\n\n"
-                    "Please list your tasks in this format:\n"
-                    "1. [Your first task]\n"
-                    "2. [Your second task]\n"
-                    "3. [Your third task]\n\n"
-                    "For example:\n"
-                    "1. Review project documents\n"
-                    "2. Send follow-up emails\n"
-                    "3. Update task tracker"
+                # For daily planning, check sentiment and proceed accordingly
+                needs_support = (
+                    analysis.get('emotional_state') == 'negative' or 
+                    analysis.get('energy_level') == 'low'
                 )
-                self.whatsapp.send_message(user_id, message)
-                self.task.update_user_state(
-                    user_id, 'DAILY_TASK_INPUT', instance_id, context_updates
-                )
+                
+                if needs_support:
+                    message = (
+                        f"I hear you, {name}. Let's take it one step at a time today.\n\n"
+                        "Would you like to:"
+                    )
+                    self.whatsapp.send_interactive_buttons(
+                        user_id,
+                        message,
+                        [
+                            {"id": "talk_feelings", "title": "Talk through feelings"},
+                            {"id": "small_task", "title": "Try small task"},
+                            {"id": "self_care", "title": "Self-care day"}
+                        ]
+                    )
+                    self.task.update_user_state(user_id, 'AWAITING_SUPPORT_CHOICE', instance_id, context_updates)
+                else:
+                    message = (
+                        f"Great energy, {name}! Let's plan your tasks for today.\n\n"
+                        "Please list your tasks in this format:\n"
+                        "1. [Your first task]\n"
+                        "2. [Your second task]\n"
+                        "3. [Your third task]"
+                    )
+                    self.whatsapp.send_message(user_id, message)
+                    self.task.update_user_state(user_id, 'DAILY_TASK_INPUT', instance_id, context_updates)
             
         except Exception as e:
             logger.error(f"Error in daily check-in: {str(e)}", exc_info=True)
