@@ -1,5 +1,6 @@
 import logging
 import time
+import re
 from typing import Dict, Any
 from app.models.user import User
 
@@ -66,7 +67,7 @@ class MiddayCheckinHandler:
                 "I had trouble processing your check-in. Could you try again?"
             )
             
-    def handle_midday_button_response(self, user_id: str, button_data: dict, instance_id: str):
+    def handle_midday_button_response(self, user_id: str, button_data: dict, instance_id: str, context: dict):
         """Handle interactive button responses during midday check-in."""
         try:
             logger.info(f"Processing midday button response for user {user_id}")
