@@ -69,7 +69,7 @@ class WeeklyCheckinHandler:
             # Handle text message for sentiment analysis
             if isinstance(message_text, str):
                 # Analyze sentiment
-                analysis = self.sentiment.analyze_checkin_text(message_text)
+                analysis = self.sentiment.analyze_sentiment(message_text)
                 logger.info(f"Weekly reflection sentiment analysis for user {user_id}: {analysis}")
                 
                 # Store sentiment data
