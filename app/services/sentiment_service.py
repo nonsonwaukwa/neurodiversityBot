@@ -58,7 +58,6 @@ Please provide the analysis in JSON format."""
                     self.base_url,
                     headers=headers,
                     json=payload,
-                    timeout=10
                 )
                 logger.info(f"DeepSeek API response status: {response.status_code}")
                 
