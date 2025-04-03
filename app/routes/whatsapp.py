@@ -272,6 +272,8 @@ def handle_message(user_id: str, message_text: str, instance_id: str, services: 
             daily_handler.handle_daily_task_input(user_id, message_text, instance_id, context)
         elif current_state == 'WEEKLY_TASK_INPUT':
             weekly_handler.handle_weekly_task_input(user_id, message_text, instance_id, context)
+        elif current_state == 'WEEKLY_REFLECTION' or current_state == 'WEEKLY_CHECK_IN':
+            weekly_handler.handle_weekly_reflection(user_id, message_text, instance_id, context)
         elif current_state == 'MIDDAY_CHECK_IN':
             midday_handler.handle_midday_checkin(user_id, message_text, instance_id, context)
         elif current_state == 'CHECK_IN':
@@ -453,7 +455,9 @@ def handle_planning_selection(selection: str, user_id: str, instance_id: str, se
             
         name = user.name.split('_')[0] if user.name and '_' in user.name else (user.name or "Friend")
         
-        if selection == 'PLAN FOR THE WEEK':
+        # Handle both numbered responses and text responses
+        selection = selection.strip().upper()
+        if selection in ['1', 'PLAN FOR THE WEEK']:
             response = (
                 "Let's plan your tasks for the upcoming week. Please reply with your tasks in this format:\n\n"
                 "Monday: Task 1, Task 2, Task 3\n"
@@ -464,7 +468,7 @@ def handle_planning_selection(selection: str, user_id: str, instance_id: str, se
             )
             new_state = 'WEEKLY_TASK_INPUT'
             planning_type = 'weekly'
-        else:  # DAY BY DAY PLANNING
+        elif selection in ['2', 'DAY BY DAY PLANNING']:
             response = (
                 f"Great choice! I'll be here every morning to help you set your daily tasks. "
                 "No pressure—just a little nudge to help you stay on track. "
@@ -472,18 +476,26 @@ def handle_planning_selection(selection: str, user_id: str, instance_id: str, se
             )
             new_state = 'DAILY_CHECK_IN'
             planning_type = 'daily'
+        else:
+            response = (
+                "I didn't quite catch that. Please choose how you'd like to plan:\n\n"
+                "1. Plan for the week - Set tasks for each day\n"
+                "2. Day by day planning - Let's focus on one day at a time"
+            )
+            new_state = 'AWAITING_PLANNING_CHOICE'
+            planning_type = None
             
         services['whatsapp'].send_message(user_id, response)
         
-        # Update user state and planning type
-        context_updates = {
-            'planning_type': planning_type,
-            'last_planning_selection': int(time.time())
-        }
-        
-        services['task'].update_user_state(
-            user_id, new_state, instance_id, context_updates
-        )
+        if planning_type:
+            # Update user state and planning type
+            context_updates = {
+                'planning_type': planning_type,
+                'last_planning_selection': int(time.time())
+            }
+            services['task'].update_user_state(
+                user_id, new_state, instance_id, context_updates
+            )
         
     except Exception as e:
         logger.error(f"Error handling planning selection for user {user_id}: {e}")

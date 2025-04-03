@@ -83,22 +83,12 @@ class WeeklyCheckinHandler:
                     response = (
                         f"I hear you, {name}. 💙 It's completely okay to not be feeling your best. "
                         "Let's take it day by day and focus on what feels manageable.\n\n"
-                        "Would you like to:\n"
-                        "1. Just talk through your feelings\n"
-                        "2. Try focusing on one small task\n"
-                        "3. Take a self-care day"
+                        "I'll check in with you tomorrow morning to help plan your day."
                     )
-                    self.whatsapp.send_interactive_buttons(
-                        user_id,
-                        response,
-                        [
-                            {"id": "talk_feelings", "title": "Talk through feelings"},
-                            {"id": "small_task", "title": "Try small task"},
-                            {"id": "self_care", "title": "Self-care day"}
-                        ]
-                    )
+                    self.whatsapp.send_message(user_id, response)
+                    context_updates['planning_type'] = 'daily'  # Default to daily planning for negative sentiment
                     self.task.update_user_state(
-                        user_id, 'AWAITING_SUPPORT_CHOICE', instance_id, context_updates
+                        user_id, 'DAILY_CHECK_IN', instance_id, context_updates
                     )
                 else:
                     response = (
