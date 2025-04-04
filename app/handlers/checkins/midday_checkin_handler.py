@@ -91,6 +91,10 @@ class MiddayCheckinHandler:
 
     def handle_check_in(self, user_id: str, message_text: str, instance_id: str) -> str:
         """Handle user's check-in response and task status updates."""
+        # Extract text if message_text is a dict (interactive message)
+        if isinstance(message_text, dict):
+            message_text = message_text['interactive']['button_reply']['title']
+        
         # Check for task status updates
         status_match = re.match(r'(DONE|PROGRESS|STUCK)\s+(\d+)', message_text.upper())
         if status_match:
