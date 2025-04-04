@@ -98,7 +98,6 @@ class WeeklyCheckinHandler:
                     )
                     self.whatsapp.send_message(user_id, response)
                     context_updates['planning_type'] = 'daily'  # Switch to daily planning
-                    context_updates['state'] = 'DAILY_CHECK_IN'  # Explicitly set state
                     self.task.update_user_state(
                         user_id, 'DAILY_CHECK_IN', instance_id, context_updates
                     )

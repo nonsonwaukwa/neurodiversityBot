@@ -223,7 +223,6 @@ def handle_message(message_id: str, user_id: str, message_text: str, instance_id
         current_state = context.get('state', 'INITIAL')
         logger.info(f"User state: {current_state}, Planning type: {context.get('planning_type')}")
         
-        # Process message
         try:
             # Handle interactive messages (button responses)
             if (isinstance(message_text, dict) and 
@@ -237,46 +236,46 @@ def handle_message(message_id: str, user_id: str, message_text: str, instance_id
                 if current_state == 'AWAITING_PLANNING_CHOICE':
                     weekly_handler.handle_weekly_reflection(user_id, message_text, instance_id, context)
                     return
-                    
                 elif current_state == 'AWAITING_SUPPORT_CHOICE':
                     logger.info("Routing to daily handler for support choice")
                     daily_handler.handle_support_choice(message_text, user_id, instance_id, context)
                     return
-                    
                 elif current_state == 'MIDDAY_CHECK_IN':
                     midday_handler.handle_midday_button_response(user_id, message_text, instance_id, context)
                     return
             
-            # Handle daily task input state
+            # Handle text message states
             if current_state == 'DAILY_TASK_INPUT':
                 logger.info(f"Processing daily task input: {message_text}")
                 daily_handler.handle_daily_task_input(user_id, message_text, instance_id, context)
                 return
             
-            # Handle small task input state
             if current_state == 'SMALL_TASK_INPUT':
                 logger.info(f"Processing small task input: {message_text}")
                 daily_handler.handle_small_task_input(user_id, message_text, instance_id, context)
                 return
-        
-            # Route regular messages based on state
+            
             if current_state == 'THERAPEUTIC_CONVERSATION':
                 support_handler.handle_therapeutic_conversation(user_id, message_text, instance_id, context)
                 return
-                
-            elif current_state == 'SELF_CARE_DAY':
+            
+            if current_state == 'SELF_CARE_DAY':
                 support_handler.handle_self_care_day(user_id, message_text, instance_id, context)
                 return
-                
-            elif current_state == 'WEEKLY_TASK_INPUT':
+            
+            if current_state == 'WEEKLY_TASK_INPUT':
                 weekly_handler.handle_weekly_task_input(user_id, message_text, instance_id, context)
                 return
-                
-            elif current_state == 'MIDDAY_CHECK_IN':
+            
+            if current_state == 'MIDDAY_CHECK_IN':
                 midday_handler.handle_midday_checkin(user_id, message_text, instance_id, context)
                 return
-                
-            elif current_state == 'TASK_UPDATE':
+            
+            if current_state == 'WEEKLY_REFLECTION':
+                weekly_handler.handle_weekly_reflection(user_id, message_text, instance_id, context)
+                return
+            
+            if current_state == 'TASK_UPDATE':
                 # Check if this is a task status update command
                 if isinstance(message_text, str) and re.match(r'^(DONE|PROGRESS|STUCK)\s+(\d+)$', message_text.strip().upper()):
                     response = midday_handler.handle_check_in(user_id, message_text, instance_id)
