@@ -90,14 +90,14 @@ class WeeklyCheckinHandler:
                 emotional_state = analysis.get('emotional_state', 'neutral')
                 energy_level = analysis.get('energy_level', 'medium')
                 
-                if emotional_state == 'negative':
+                if emotional_state == 'negative' or energy_level == 'low':
                     response = (
                         f"I hear you, {name}. 💙 It's completely okay to not be feeling your best. "
                         "Let's take it day by day and focus on what feels manageable.\n\n"
                         "I'll check in with you tomorrow morning to help plan your day."
                     )
                     self.whatsapp.send_message(user_id, response)
-                    context_updates['planning_type'] = 'daily'  # Default to daily planning for negative sentiment
+                    context_updates['planning_type'] = 'daily'  # Switch to daily planning
                     self.task.update_user_state(
                         user_id, 'DAILY_CHECK_IN', instance_id, context_updates
                     )
