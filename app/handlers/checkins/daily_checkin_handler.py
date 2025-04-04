@@ -339,7 +339,7 @@ class DailyCheckinHandler:
                 
                 # Generate empathetic response
                 response = (
-                    "Perfect! I've saved {message_text} as your focus task for today. Sometimes the smallest steps make the biggest difference. I'll check in with you at midday to see how it's going. Remember, you can always adjust or change it if needed. 💜"
+                    f"Perfect! I've saved {message_text} as your focus task for today. Sometimes the smallest steps make the biggest difference. I'll check in with you at midday to see how it's going. Remember, you can always adjust or change it if needed. 💜"
                 )
                 
                 # Send response and update state
