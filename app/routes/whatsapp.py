@@ -212,16 +212,16 @@ def get_instance_id(phone_number_id: str) -> str:
 def handle_message(message_id: str, user_id: str, message_text: str, instance_id: str, services: dict):
     """Handle incoming WhatsApp message."""
     try:
-        # Get user's current state and context
-        context = services['task'].get_user_context(user_id, instance_id)
-        current_state = context.get('state', 'INITIAL')
-        logger.info(f"User state: {current_state}, Planning type: {context.get('planning_type')}")
-        
         # Initialize handlers
         daily_handler = DailyCheckinHandler(services['whatsapp'], services['task'], services['sentiment'])
         weekly_handler = WeeklyCheckinHandler(services['whatsapp'], services['task'], services['sentiment'])
         midday_handler = MiddayCheckinHandler(services['whatsapp'], services['task'], services['sentiment'], services['task'])
         support_handler = SupportHandler(services['whatsapp'], services['task'], services['sentiment'])
+        
+        # Get user's current state and context using daily handler
+        context = daily_handler.get_user_context(user_id, instance_id)
+        current_state = context.get('state', 'INITIAL')
+        logger.info(f"User state: {current_state}, Planning type: {context.get('planning_type')}")
         
         # Process message
         try:

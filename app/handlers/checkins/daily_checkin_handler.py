@@ -37,7 +37,19 @@ class DailyCheckinHandler:
         for key in expired_keys:
             del self._message_cache[key]
         
-    def handle_daily_checkin(self, user_id: str, message_text: str, instance_id: str, context: dict) -> None:
+    def get_user_context(self, user_id: str, instance_id: str) -> dict:
+        """Get user's current state and context."""
+        try:
+            # Get user state and context
+            state = self.task.get_user_state(user_id, instance_id)
+            context = state.get('context', {}) if state else {}
+            context['state'] = state.get('state', 'INITIAL') if state else 'INITIAL'
+            return context
+        except Exception as e:
+            logger.error(f"Error getting user context: {str(e)}")
+            return {'state': 'INITIAL'}
+
+    def handle_daily_checkin(self, user_id: str, message_text: str, instance_id: str, context: dict = None) -> None:
         """Handle daily check-in flow."""
         try:
             # Get or create user
@@ -47,6 +59,10 @@ class DailyCheckinHandler:
                 return
                 
             name = user.name.split('_')[0] if user.name and '_' in user.name else (user.name or "Friend")
+            
+            # Get context if not provided
+            if context is None:
+                context = self.get_user_context(user_id, instance_id)
             
             # Analyze sentiment if message is text
             if isinstance(message_text, str):
