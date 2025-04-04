@@ -323,10 +323,7 @@ class DailyCheckinHandler:
                 
                 # Generate empathetic response
                 response = (
-                    "That's perfect - getting enough rest is so important, especially when things feel overwhelming. 💜\n\n"
-                    "I've noted this as your focus for today. Remember, it's completely okay to take things slow and "
-                    "prioritize your wellbeing. I'll check in with you later to see how you're doing.\n\n"
-                    "Is there anything else you need support with?"
+                    "Perfect! I've saved {message_text} as your focus task for today. Sometimes the smallest steps make the biggest difference. I'll check in with you at midday to see how it's going. Remember, you can always adjust or change it if needed. 💜"
                 )
                 
                 # Send response and update state

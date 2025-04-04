@@ -1,6 +1,7 @@
 import logging
 import time
 import re
+import random
 from typing import Dict, Any
 from app.models.user import User
 
@@ -54,12 +55,12 @@ class MiddayCheckinHandler:
                 # Try to handle as task command first
                 command_match = re.match(r'^(DONE|PROGRESS|STUCK)\s+(\d+)$', message_text.strip().upper())
                 if command_match:
-                    response = self.task_handler.handle_task_command(user_id, command_match, instance_id)
+                    response = self.handle_check_in(user_id, message_text, instance_id)
                     self.whatsapp.send_message(user_id, response)
                     return
             
             # If not a task command, handle as general check-in
-            response = self.task_handler.handle_check_in(user_id, message_text, instance_id)
+            response = self.handle_check_in(user_id, message_text, instance_id)
             self.whatsapp.send_message(user_id, response)
             
             # Update check-in context
@@ -86,6 +87,102 @@ class MiddayCheckinHandler:
             self.whatsapp.send_message(
                 user_id,
                 "I had trouble processing your check-in. Could you try again?"
+            )
+
+    def handle_check_in(self, user_id: str, message_text: str, instance_id: str) -> str:
+        """Handle user's check-in response and task status updates."""
+        # Check for task status updates
+        status_match = re.match(r'(DONE|PROGRESS|STUCK)\s+(\d+)', message_text.upper())
+        if status_match:
+            status_type = status_match.group(1)
+            task_num_str = status_match.group(2)
+            
+            try:
+                task_num = int(task_num_str) - 1  # Convert to 0-based index
+                
+                # Get current tasks to validate task number
+                tasks = self.task.get_daily_tasks(user_id, instance_id)
+                if task_num < 0 or task_num >= len(tasks):
+                    return f"Hmm, I don't see task #{task_num_str} on your list. Want to try again or type 'TASKS' to see your current list?"
+                
+                # Get the task name for personalized response
+                task_name = tasks[task_num]['task']
+                
+                status_map = {
+                    'DONE': 'completed',
+                    'PROGRESS': 'in_progress',
+                    'STUCK': 'stuck'
+                }
+                
+                self.task.update_task_status(user_id, task_num, status_map[status_type], instance_id)
+                
+                if status_type == 'DONE':
+                    # Vary responses to avoid repetition
+                    responses = [
+                        f"🎉 Yes! You completed '{task_name}'! That's a genuine win - how did it feel to finish that one?",
+                        f"✨ Amazing job finishing '{task_name}'! What helped you get this done today?",
+                        f"💪 '{task_name}' → DONE! That's awesome progress. Would you like to take a moment to celebrate?"
+                    ]
+                    return random.choice(responses)
+                elif status_type == 'PROGRESS':
+                    responses = [
+                        f"👍 Thanks for letting me know you're working on '{task_name}'. Taking those first steps can be the hardest part!",
+                        f"🔄 Got it - '{task_name}' is in progress. Remember, consistent effort matters more than perfect execution.",
+                        f"⏳ '{task_name}' in progress - that's great! Is there anything that would make this task flow better for you?"
+                    ]
+                    return random.choice(responses)
+                else:  # STUCK
+                    return (
+                        f"I hear you're feeling stuck with '{task_name}'. That happens to everyone, especially with complicated or less interesting tasks.\n\n"
+                        f"Would you like to:\n"
+                        f"1. Break this down into smaller steps?\n"
+                        f"2. Talk about what specific part feels challenging?\n"
+                        f"3. Get some motivation or a different approach?\n"
+                        f"4. Set this aside for now and come back to it later?"
+                    )
+            except ValueError:
+                return "I didn't quite catch which task number you meant. Could you try again with something like 'DONE 1' or 'STUCK 2'?"
+        
+        # If we get here, it's a general message during CHECK_IN state
+        # Analyze sentiment to provide an empathetic response
+        sentiment = self.sentiment.analyze_sentiment(message_text)
+        
+        # Get current tasks
+        tasks = self.task.get_daily_tasks(user_id, instance_id)
+        completed = sum(1 for task in tasks if task.get('status') == 'completed')
+        
+        # Create a contextual response based on progress and sentiment
+        if not tasks:
+            return "We haven't set any tasks for today yet. Would you like to share what you'd like to focus on?"
+        
+        # Format task list with status indicators
+        task_list = '\n'.join([
+            f"{i+1}. {'✅' if task['status'] == 'completed' else '⭐'} {task['task']}" 
+            for i, task in enumerate(tasks)
+        ])
+        
+        # Varied responses based on progress
+        if completed == 0:
+            if sentiment.get('sentiment') == 'negative':
+                return (
+                    f"I hear things might be tough right now. That's okay - some days are harder than others.\n\n"
+                    f"Here are your tasks when you're ready:\n\n{task_list}\n\n"
+                    f"Even small progress counts. Is there something specific making today challenging?"
+                )
+            else:
+                return (
+                    f"Here's what we're focusing on today:\n\n{task_list}\n\n"
+                    f"How's it going so far? Remember, you can update me anytime with 'DONE', 'PROGRESS', or 'STUCK'."
+                )
+        elif completed == len(tasks):
+            return (
+                f"🎊 Wow! You've completed all your tasks!\n\n{task_list}\n\n"
+                f"That's seriously impressive. How are you feeling about what you've accomplished? Would you like to set any new goals or take some well-deserved rest?"
+            )
+        else:
+            return (
+                f"Here's where things stand:\n\n{task_list}\n\n"
+                f"You've completed {completed}/{len(tasks)} tasks - that's progress to be proud of! How are you feeling about the rest? Anything I can help with?"
             )
             
     def handle_midday_button_response(self, user_id: str, button_data: dict, instance_id: str, context: dict):
