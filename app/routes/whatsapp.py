@@ -245,22 +245,22 @@ def handle_message(message_id: str, user_id: str, message_text: str, instance_id
                     
                 elif current_state == 'MIDDAY_CHECK_IN':
                     midday_handler.handle_midday_button_response(user_id, message_text, instance_id, context)
-            return
-        
+                    return
+            
             # Handle daily task input state
             if current_state == 'DAILY_TASK_INPUT':
                 logger.info(f"Processing daily task input: {message_text}")
                 daily_handler.handle_daily_task_input(user_id, message_text, instance_id, context)
-            return
+                return
             
             # Handle small task input state
             if current_state == 'SMALL_TASK_INPUT':
                 logger.info(f"Processing small task input: {message_text}")
                 daily_handler.handle_small_task_input(user_id, message_text, instance_id, context)
-            return
+                return
         
             # Route regular messages based on state
-        if current_state == 'THERAPEUTIC_CONVERSATION':
+            if current_state == 'THERAPEUTIC_CONVERSATION':
                 support_handler.handle_therapeutic_conversation(user_id, message_text, instance_id, context)
                 return
                 
@@ -280,11 +280,11 @@ def handle_message(message_id: str, user_id: str, message_text: str, instance_id
                 # Check if this is a task status update command
                 if isinstance(message_text, str) and re.match(r'^(DONE|PROGRESS|STUCK)\s+(\d+)$', message_text.strip().upper()):
                     response = midday_handler.handle_check_in(user_id, message_text, instance_id)
-                services['whatsapp'].send_message(user_id, response)
-            return
+                    services['whatsapp'].send_message(user_id, response)
+                    return
                 # If not a task command, handle as regular midday check-in
                 midday_handler.handle_midday_checkin(user_id, message_text, instance_id, context)
-            return
+                return
             
             # Default to daily check-in for unhandled states
             daily_handler.handle_daily_checkin(user_id, message_text, instance_id, context)
@@ -304,8 +304,8 @@ def handle_message(message_id: str, user_id: str, message_text: str, instance_id
     except Exception as e:
         logger.error(f"Error in handle_message: {str(e)}", exc_info=True)
         try:
-        services['whatsapp'].send_message(
-            user_id,
+            services['whatsapp'].send_message(
+                user_id,
                 "I encountered an error. Let's start fresh - how are you feeling today?"
             )
         except Exception as send_error:
