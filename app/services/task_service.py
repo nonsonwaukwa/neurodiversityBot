@@ -802,7 +802,6 @@ class TaskService:
             instance_user_ref.update({
                 'daily_tasks': tasks,
                 'last_daily_planning': int(time.time()),
-                'planning_type': 'daily'
             })
             logger.info(f"[STORE_DAILY] Successfully stored in instance collection")
             
