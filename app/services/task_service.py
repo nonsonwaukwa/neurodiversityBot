@@ -477,34 +477,42 @@ class TaskService:
                     return [focus_task]  # Return only the focus task if it exists for today
         
         # Layer 2: Get tasks based on planning type
-        planning_type = user_data.get('planning_type')  # Remove default value
+        planning_type = user_data.get('planning_type')
         logger.info(f"Getting daily tasks with planning type: {planning_type}")
         
+        # First check daily_tasks field
+        daily_tasks = user_data.get('daily_tasks', [])
+        if daily_tasks:
+            logger.info(f"Found {len(daily_tasks)} daily tasks")
+            return daily_tasks
+            
+        # Then check weekly_tasks if planning type is weekly
         if planning_type == 'weekly':
-            # For weekly planning, get today's tasks from weekly plan
             day_name = datetime.now().strftime('%A').lower()
             weekly_tasks = user_data.get('weekly_tasks', {})
             today_tasks = weekly_tasks.get(day_name, [])
-            logger.info(f"Found {len(today_tasks)} weekly tasks for {day_name}")
-            return today_tasks
-        else:
-            # For daily planning or undefined planning type, check daily_tasks field first
-            daily_tasks = user_data.get('daily_tasks', [])
-            if daily_tasks:
-                logger.info(f"Found {len(daily_tasks)} daily tasks")
-                return daily_tasks
-            else:
-                # If no daily tasks, check tasks field and filter by creation date
-                tasks = user_data.get('tasks', [])
-                today_tasks = []
-                for task in tasks:
-                    created_at = task.get('created_at')
-                    if created_at:
-                        task_date = datetime.fromtimestamp(created_at).strftime('%Y-%m-%d')
-                        if task_date == today:
-                            today_tasks.append(task)
-                logger.info(f"Found {len(today_tasks)} tasks created today")
+            if today_tasks:
+                logger.info(f"Found {len(today_tasks)} weekly tasks for {day_name}")
                 return today_tasks
+        
+        # Finally check regular tasks field and filter by creation date
+        tasks = user_data.get('tasks', [])
+        today_tasks = []
+        for task in tasks:
+            # If task already has a status, include it
+            if 'status' in task:
+                today_tasks.append(task)
+                continue
+                
+            # Otherwise check creation date
+            created_at = task.get('created_at')
+            if created_at:
+                task_date = datetime.fromtimestamp(created_at).strftime('%Y-%m-%d')
+                if task_date == today:
+                    today_tasks.append(task)
+                    
+        logger.info(f"Found {len(today_tasks)} tasks in regular tasks array")
+        return today_tasks
 
     def get_daily_tasks(self, user_id: str, instance_id: str = 'default') -> List[Dict[str, Any]]:
         """Get the user's tasks for the current day."""
