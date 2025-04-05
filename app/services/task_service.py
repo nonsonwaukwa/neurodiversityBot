@@ -462,6 +462,50 @@ class TaskService:
             print(f"Error getting user metrics: {str(e)}")
             return default_metrics
         
+    def _get_tasks_from_data(self, user_data: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Helper method to get tasks from user data."""
+        today = datetime.now().strftime('%Y-%m-%d')
+        
+        # Layer 1: Check for focus task first
+        focus_task = user_data.get('focus_task')
+        if focus_task:
+            created_at = focus_task.get('created_at')
+            if created_at:
+                task_date = datetime.fromtimestamp(created_at).strftime('%Y-%m-%d')
+                if task_date == today:
+                    logger.info(f"Found focus task for today: {focus_task}")
+                    return [focus_task]  # Return only the focus task if it exists for today
+        
+        # Layer 2: Get tasks based on planning type
+        planning_type = user_data.get('planning_type')  # Remove default value
+        logger.info(f"Getting daily tasks with planning type: {planning_type}")
+        
+        if planning_type == 'weekly':
+            # For weekly planning, get today's tasks from weekly plan
+            day_name = datetime.now().strftime('%A').lower()
+            weekly_tasks = user_data.get('weekly_tasks', {})
+            today_tasks = weekly_tasks.get(day_name, [])
+            logger.info(f"Found {len(today_tasks)} weekly tasks for {day_name}")
+            return today_tasks
+        else:
+            # For daily planning or undefined planning type, check daily_tasks field first
+            daily_tasks = user_data.get('daily_tasks', [])
+            if daily_tasks:
+                logger.info(f"Found {len(daily_tasks)} daily tasks")
+                return daily_tasks
+            else:
+                # If no daily tasks, check tasks field and filter by creation date
+                tasks = user_data.get('tasks', [])
+                today_tasks = []
+                for task in tasks:
+                    created_at = task.get('created_at')
+                    if created_at:
+                        task_date = datetime.fromtimestamp(created_at).strftime('%Y-%m-%d')
+                        if task_date == today:
+                            today_tasks.append(task)
+                logger.info(f"Found {len(today_tasks)} tasks created today")
+                return today_tasks
+
     def get_daily_tasks(self, user_id: str, instance_id: str = 'default') -> List[Dict[str, Any]]:
         """Get the user's tasks for the current day."""
         try:
@@ -473,16 +517,17 @@ class TaskService:
                     return []
                     
                 user_data = user_doc.to_dict()
-                return user_data.get('tasks', [])
+                return self._get_tasks_from_data(user_data)
             else:
                 # Fallback to in-memory storage
                 instance_key = f"{instance_id}:{user_id}"
                 if instance_key not in memory_storage['users']:
                     return []
                 
-                return memory_storage['users'][instance_key].get('tasks', [])
+                user_data = memory_storage['users'][instance_key]
+                return self._get_tasks_from_data(user_data)
         except Exception as e:
-            print(f"Error getting daily tasks: {str(e)}")
+            logger.error(f"Error getting daily tasks: {str(e)}")
             return []
     
     def get_user_name(self, user_id: str, instance_id: str = 'default') -> str:

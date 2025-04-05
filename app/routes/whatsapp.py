@@ -232,7 +232,14 @@ def handle_message(message_id: str, user_id: str, message_text: str, instance_id
                 button_response = message_text['interactive']['button_reply']
                 logger.info(f"Processing button response: {button_response} for state: {current_state}")
                 
-                # Route button responses based on state
+                # Check if this is a task status button (done, progress, stuck)
+                button_id = button_response['id']
+                if button_id.startswith(('done_', 'progress_', 'stuck_')):
+                    logger.info("Routing to midday handler for task status update")
+                    midday_handler.handle_midday_button_response(user_id, message_text, instance_id, context)
+                    return
+                
+                # Route other button responses based on state
                 if current_state == 'AWAITING_PLANNING_CHOICE':
                     weekly_handler.handle_weekly_reflection(user_id, message_text, instance_id, context)
                     return
