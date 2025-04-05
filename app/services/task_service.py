@@ -336,9 +336,38 @@ class TaskService:
                     return
                     
                 user_data = user_doc.to_dict()
-                tasks = user_data.get('tasks', [])
                 
-                if 0 <= task_index < len(tasks):
+                # First check daily_tasks
+                daily_tasks = user_data.get('daily_tasks', [])
+                if daily_tasks and 0 <= task_index < len(daily_tasks):
+                    daily_tasks[task_index]['status'] = status
+                    update_data = {
+                        'daily_tasks': daily_tasks,
+                        'last_interaction': datetime.now()
+                    }
+                    instance_user_ref.update(update_data)
+                    logger.info(f"Updated task status in daily_tasks for user {user_id}")
+                    return
+                
+                # Then check weekly_tasks if planning type is weekly
+                if user_data.get('planning_type') == 'weekly':
+                    day_name = datetime.now().strftime('%A').lower()
+                    weekly_tasks = user_data.get('weekly_tasks', {})
+                    today_tasks = weekly_tasks.get(day_name, [])
+                    if today_tasks and 0 <= task_index < len(today_tasks):
+                        today_tasks[task_index]['status'] = status
+                        weekly_tasks[day_name] = today_tasks
+                        update_data = {
+                            'weekly_tasks': weekly_tasks,
+                            'last_interaction': datetime.now()
+                        }
+                        instance_user_ref.update(update_data)
+                        logger.info(f"Updated task status in weekly_tasks for user {user_id}")
+                        return
+                
+                # Finally check regular tasks
+                tasks = user_data.get('tasks', [])
+                if tasks and 0 <= task_index < len(tasks):
                     tasks[task_index]['status'] = status
                     
                     # Update metrics
@@ -352,23 +381,43 @@ class TaskService:
                         'last_interaction': datetime.now(),
                         'metrics': metrics
                     }
-                    
-                    # Update both collections
                     instance_user_ref.update(update_data)
-                    unified_user_ref = self.db.collection('users').document(user_id)
-                    unified_user_ref.update(update_data)
+                    logger.info(f"Updated task status in regular tasks for user {user_id}")
             else:
                 # Fallback to in-memory storage
                 instance_key = f"{instance_id}:{user_id}"
                 if instance_key not in memory_storage['users']:
                     return
                 
-                tasks = memory_storage['users'][instance_key].get('tasks', [])
-                if 0 <= task_index < len(tasks):
+                user_data = memory_storage['users'][instance_key]
+                
+                # First check daily_tasks
+                daily_tasks = user_data.get('daily_tasks', [])
+                if daily_tasks and 0 <= task_index < len(daily_tasks):
+                    daily_tasks[task_index]['status'] = status
+                    memory_storage['users'][instance_key]['daily_tasks'] = daily_tasks
+                    memory_storage['users'][instance_key]['last_interaction'] = datetime.now()
+                    return
+                
+                # Then check weekly_tasks if planning type is weekly
+                if user_data.get('planning_type') == 'weekly':
+                    day_name = datetime.now().strftime('%A').lower()
+                    weekly_tasks = user_data.get('weekly_tasks', {})
+                    today_tasks = weekly_tasks.get(day_name, [])
+                    if today_tasks and 0 <= task_index < len(today_tasks):
+                        today_tasks[task_index]['status'] = status
+                        weekly_tasks[day_name] = today_tasks
+                        memory_storage['users'][instance_key]['weekly_tasks'] = weekly_tasks
+                        memory_storage['users'][instance_key]['last_interaction'] = datetime.now()
+                        return
+                
+                # Finally check regular tasks
+                tasks = user_data.get('tasks', [])
+                if tasks and 0 <= task_index < len(tasks):
                     tasks[task_index]['status'] = status
                     
                     # Update metrics
-                    metrics = memory_storage['users'][instance_key].get('metrics', {})
+                    metrics = user_data.get('metrics', {})
                     if status == 'completed':
                         metrics['completed_tasks'] = metrics.get('completed_tasks', 0) + 1
                         metrics['completion_rate'] = (metrics['completed_tasks'] / metrics['total_tasks']) * 100 if metrics['total_tasks'] > 0 else 0
@@ -376,9 +425,11 @@ class TaskService:
                     memory_storage['users'][instance_key]['tasks'] = tasks
                     memory_storage['users'][instance_key]['last_interaction'] = datetime.now()
                     memory_storage['users'][instance_key]['metrics'] = metrics
+                    
         except Exception as e:
-            print(f"Error updating task status: {str(e)}")
-            
+            logger.error(f"Error updating task status: {str(e)}", exc_info=True)
+            raise
+
     def log_conversation(self, user_id: str, message: str, response: str, instance_id: str = 'default') -> None:
         """Log conversation history for the user."""
         try:
