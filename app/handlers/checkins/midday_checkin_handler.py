@@ -197,14 +197,15 @@ class MiddayCheckinHandler:
             
             # Check for duplicate message if it's an interactive message
             if isinstance(button_data, dict):
-                message_id = button_data.get('message_id')
+                message_id = button_data.get('id')
                 if message_id and self._is_duplicate_message(message_id, user_id):
                     logger.info(f"Skipping duplicate message {message_id} for user {user_id}")
                     return
             
             logger.info(f"Processing midday button response for user {user_id}")
             
-            button_id = button_data['button_reply']['id']
+            # Extract button data from the correct structure
+            button_id = button_data['interactive']['button_reply']['id']
             
             # Extract task number from button ID (e.g., 'done_1', 'progress_2', 'stuck_3')
             task_num = int(button_id.split('_')[1]) - 1  # Convert to 0-based index
