@@ -345,12 +345,17 @@ class DailyCheckinHandler:
                 # Send response and update state
                 self.whatsapp.send_message(user_id, response)
                 
-                # Update context with the task
+                # Update context with the task while preserving existing context
                 context_updates = {
                     'daily_tasks': [task_data],
                     'last_task_update': int(time.time())
                 }
-                self.task.update_user_state(user_id, 'DAILY_CHECK_IN', instance_id, context_updates)
+                
+                # Only include planning_type if it exists in current context
+                if 'planning_type' in context:
+                    context_updates['planning_type'] = context['planning_type']
+                
+                self.task.update_user_state(user_id, 'TASK_UPDATE', instance_id, context_updates)
                 
             except Exception as e:
                 logger.error(f"Error storing small task: {str(e)}")

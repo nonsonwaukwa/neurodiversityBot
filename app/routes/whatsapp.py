@@ -240,7 +240,7 @@ def handle_message(message_id: str, user_id: str, message_text: str, instance_id
                     logger.info("Routing to daily handler for support choice")
                     daily_handler.handle_support_choice(message_text, user_id, instance_id, context)
                     return
-                elif current_state == 'MIDDAY_CHECK_IN':
+                elif current_state in ['MIDDAY_CHECK_IN', 'TASK_UPDATE']:
                     logger.info("Routing to midday handler for button response")
                     midday_handler.handle_midday_button_response(user_id, message_text, instance_id, context)
                     return
