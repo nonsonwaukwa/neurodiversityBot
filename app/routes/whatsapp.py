@@ -223,90 +223,77 @@ def handle_message(message_id: str, user_id: str, message_text: str, instance_id
         current_state = context.get('state', 'INITIAL')
         logger.info(f"User state: {current_state}, Planning type: {context.get('planning_type')}")
         
-        try:
-            # Handle interactive messages (button responses)
-            if (isinstance(message_text, dict) and 
-                message_text.get('type') == 'interactive' and 
-                message_text.get('interactive', {}).get('type') == 'button_reply'):
-                
-                button_response = message_text['interactive']['button_reply']
-                logger.info(f"Processing button response: {button_response} for state: {current_state}")
-                
-                # Check if this is a task status button (done, progress, stuck)
-                button_id = button_response['id']
-                if button_id.startswith(('done_', 'progress_', 'stuck_')):
-                    logger.info("Routing to midday handler for task status update")
-                    midday_handler.handle_midday_button_response(user_id, message_text, instance_id, context)
-                    return
-                
-                # Route other button responses based on state
-                if current_state == 'AWAITING_PLANNING_CHOICE':
-                    weekly_handler.handle_weekly_reflection(user_id, message_text, instance_id, context)
-                    return
-                elif current_state == 'AWAITING_SUPPORT_CHOICE':
-                    logger.info("Routing to daily handler for support choice")
-                    daily_handler.handle_support_choice(message_text, user_id, instance_id, context)
-                    return
-                elif current_state in ['MIDDAY_CHECK_IN', 'TASK_UPDATE']:
-                    logger.info("Routing to midday handler for button response")
-                    midday_handler.handle_midday_button_response(user_id, message_text, instance_id, context)
-                    return
+        # Handle interactive messages (button responses)
+        if (isinstance(message_text, dict) and 
+            message_text.get('type') == 'interactive' and 
+            message_text.get('interactive', {}).get('type') == 'button_reply'):
             
-            # Handle text message states
-            if current_state == 'DAILY_TASK_INPUT':
-                logger.info(f"Processing daily task input: {message_text}")
-                daily_handler.handle_daily_task_input(user_id, message_text, instance_id, context)
+            button_response = message_text['interactive']['button_reply']
+            logger.info(f"Processing button response: {button_response} for state: {current_state}")
+            
+            # Check if this is a task status button (done, progress, stuck)
+            button_id = button_response['id']
+            if button_id.startswith(('done_', 'progress_', 'stuck_')):
+                logger.info("Routing to midday handler for task status update")
+                midday_handler.handle_midday_button_response(user_id, message_text, instance_id, context)
                 return
             
-            if current_state == 'SMALL_TASK_INPUT':
-                logger.info(f"Processing small task input: {message_text}")
-                daily_handler.handle_small_task_input(user_id, message_text, instance_id, context)
-                return
-            
-            if current_state == 'THERAPEUTIC_CONVERSATION':
-                support_handler.handle_therapeutic_conversation(user_id, message_text, instance_id, context)
-                return
-            
-            if current_state == 'SELF_CARE_DAY':
-                support_handler.handle_self_care_day(user_id, message_text, instance_id, context)
-                return
-            
-            if current_state == 'WEEKLY_TASK_INPUT':
-                weekly_handler.handle_weekly_task_input(user_id, message_text, instance_id, context)
-                return
-            
-            if current_state == 'MIDDAY_CHECK_IN':
-                midday_handler.handle_midday_checkin(user_id, message_text, instance_id, context)
-                return
-            
-            if current_state == 'WEEKLY_REFLECTION':
+            # Route other button responses based on state
+            if current_state == 'AWAITING_PLANNING_CHOICE':
                 weekly_handler.handle_weekly_reflection(user_id, message_text, instance_id, context)
                 return
-            
-            if current_state == 'TASK_UPDATE':
-                # Check if this is a task status update command
-                if isinstance(message_text, str) and re.match(r'^(DONE|PROGRESS|STUCK)\s+(\d+)$', message_text.strip().upper()):
-                    response = midday_handler.handle_check_in(user_id, message_text, instance_id)
-                    services['whatsapp'].send_message(user_id, response)
-                    return
-                # If not a task command, handle as regular midday check-in
-                midday_handler.handle_midday_checkin(user_id, message_text, instance_id, context)
+            elif current_state == 'AWAITING_SUPPORT_CHOICE':
+                logger.info("Routing to daily handler for support choice")
+                daily_handler.handle_support_choice(message_text, user_id, instance_id, context)
                 return
-            
-            # Default to daily check-in for unhandled states
-            daily_handler.handle_daily_checkin(user_id, message_text, instance_id, context)
-            
-        except Exception as e:
-            logger.error(f"Error processing message: {str(e)}", exc_info=True)
-            services['whatsapp'].send_message(
-                user_id,
-                "I'm not sure how to help with that. Would you like to:\n"
-                "• Check your tasks\n"
-                "• Start fresh with a new check-in\n"
-                "• Get some support"
-            )
-            
-        logger.info(f"Successfully processed message {message_id}")
+            elif current_state in ['MIDDAY_CHECK_IN', 'TASK_UPDATE']:
+                logger.info("Routing to midday handler for button response")
+                midday_handler.handle_midday_button_response(user_id, message_text, instance_id, context)
+                return
+        
+        # Handle text message states
+        if current_state == 'DAILY_TASK_INPUT':
+            logger.info(f"Processing daily task input: {message_text}")
+            daily_handler.handle_daily_task_input(user_id, message_text, instance_id, context)
+            return
+        
+        if current_state == 'SMALL_TASK_INPUT':
+            logger.info(f"Processing small task input: {message_text}")
+            daily_handler.handle_small_task_input(user_id, message_text, instance_id, context)
+            return
+        
+        if current_state == 'THERAPEUTIC_CONVERSATION':
+            support_handler.handle_therapeutic_conversation(user_id, message_text, instance_id, context)
+            return
+        
+        if current_state == 'SELF_CARE_DAY':
+            support_handler.handle_self_care_day(user_id, message_text, instance_id, context)
+            return
+        
+        if current_state == 'WEEKLY_TASK_INPUT':
+            weekly_handler.handle_weekly_task_input(user_id, message_text, instance_id, context)
+            return
+        
+        if current_state == 'MIDDAY_CHECK_IN':
+            midday_handler.handle_midday_checkin(user_id, message_text, instance_id, context)
+            return
+        
+        if current_state == 'WEEKLY_REFLECTION':
+            weekly_handler.handle_weekly_reflection(user_id, message_text, instance_id, context)
+            return
+        
+        if current_state == 'TASK_UPDATE':
+            # Check if this is a task status update command
+            if isinstance(message_text, str) and re.match(r'^(DONE|PROGRESS|STUCK)\s+(\d+)$', message_text.strip().upper()):
+                response = midday_handler.handle_check_in(user_id, message_text, instance_id)
+                services['whatsapp'].send_message(user_id, response)
+                return
+            # If not a task command, handle as regular midday check-in
+            midday_handler.handle_midday_checkin(user_id, message_text, instance_id, context)
+            return
+        
+        # Default to daily check-in for unhandled states
+        daily_handler.handle_daily_checkin(user_id, message_text, instance_id, context)
         
     except Exception as e:
         logger.error(f"Error in handle_message: {str(e)}", exc_info=True)

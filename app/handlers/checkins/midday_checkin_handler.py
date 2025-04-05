@@ -207,51 +207,132 @@ class MiddayCheckinHandler:
             # Extract button data from the correct structure
             button_id = button_data['interactive']['button_reply']['id']
             
-            # Extract task number from button ID (e.g., 'done_1', 'progress_2', 'stuck_3')
-            task_num = int(button_id.split('_')[1]) - 1  # Convert to 0-based index
-            command_type = button_id.split('_')[0].upper()
-            
-            # Map command type to status
-            status_map = {
-                'DONE': 'completed',
-                'PROGRESS': 'in_progress',
-                'STUCK': 'stuck'
-            }
-            
-            # Update task status
-            self.task.update_task_status(user_id, task_num, status_map[command_type], instance_id)
-            
-            # Get the updated task list
-            tasks = self.task.get_daily_tasks(user_id, instance_id)
-            if task_num < 0 or task_num >= len(tasks):
-                response = f"Hmm, I don't see task #{task_num + 1} on your list. Want to try again or type 'TASKS' to see your current list?"
+            # Check if this is a confirmation response
+            if button_id.startswith('confirm_'):
+                # Extract the original command from the confirmation ID
+                # Format: confirm_yes_done_1 or confirm_no_done_1
+                _, response, command_type, task_num = button_id.split('_')
+                task_num = int(task_num) - 1  # Convert to 0-based index
+                
+                if response == 'yes':
+                    # Map command type to status
+                    status_map = {
+                        'DONE': 'completed',
+                        'PROGRESS': 'in_progress',
+                        'STUCK': 'stuck'
+                    }
+                    
+                    # Update task status
+                    self.task.update_task_status(user_id, task_num, status_map[command_type.upper()], instance_id)
+                    
+                    # Get the updated task list
+                    tasks = self.task.get_daily_tasks(user_id, instance_id)
+                    if task_num < 0 or task_num >= len(tasks):
+                        response = f"Hmm, I don't see task #{task_num + 1} on your list. Want to try again or type 'TASKS' to see your current list?"
+                    else:
+                        task_name = tasks[task_num]['task']
+                        if command_type.upper() == 'DONE':
+                            responses = [
+                                f"🎉 Yes! You completed '{task_name}'! That's a genuine win - how did it feel to finish that one?",
+                                f"✨ Amazing job finishing '{task_name}'! What helped you get this done today?",
+                                f"💪 '{task_name}' → DONE! That's awesome progress. Would you like to take a moment to celebrate?"
+                            ]
+                            response = random.choice(responses)
+                        elif command_type.upper() == 'PROGRESS':
+                            responses = [
+                                f"👍 Thanks for letting me know you're working on '{task_name}'. Taking those first steps can be the hardest part!",
+                                f"🔄 Got it - '{task_name}' is in progress. Remember, consistent effort matters more than perfect execution.",
+                                f"⏳ '{task_name}' in progress - that's great! Is there anything that would make this task flow better for you?"
+                            ]
+                            response = random.choice(responses)
+                        else:  # STUCK
+                            response = (
+                                f"I hear you're feeling stuck with '{task_name}'. That happens to everyone, especially with complicated or less interesting tasks.\n\n"
+                                f"Would you like to:\n"
+                                f"1. Break this down into smaller steps?\n"
+                                f"2. Talk about what specific part feels challenging?\n"
+                                f"3. Get some motivation or a different approach?\n"
+                                f"4. Set this aside for now and come back to it later?"
+                            )
+                else:
+                    response = "No problem! I'll keep the task status as it was."
+                
+                self.whatsapp.send_message(user_id, response)
             else:
-                task_name = tasks[task_num]['task']
-                if command_type == 'DONE':
-                    responses = [
-                        f"🎉 Yes! You completed '{task_name}'! That's a genuine win - how did it feel to finish that one?",
-                        f"✨ Amazing job finishing '{task_name}'! What helped you get this done today?",
-                        f"💪 '{task_name}' → DONE! That's awesome progress. Would you like to take a moment to celebrate?"
-                    ]
-                    response = random.choice(responses)
-                elif command_type == 'PROGRESS':
-                    responses = [
-                        f"👍 Thanks for letting me know you're working on '{task_name}'. Taking those first steps can be the hardest part!",
-                        f"🔄 Got it - '{task_name}' is in progress. Remember, consistent effort matters more than perfect execution.",
-                        f"⏳ '{task_name}' in progress - that's great! Is there anything that would make this task flow better for you?"
-                    ]
-                    response = random.choice(responses)
-                else:  # STUCK
-                    response = (
-                        f"I hear you're feeling stuck with '{task_name}'. That happens to everyone, especially with complicated or less interesting tasks.\n\n"
-                        f"Would you like to:\n"
-                        f"1. Break this down into smaller steps?\n"
-                        f"2. Talk about what specific part feels challenging?\n"
-                        f"3. Get some motivation or a different approach?\n"
-                        f"4. Set this aside for now and come back to it later?"
+                # This is a regular status update button
+                # Extract task number from button ID (e.g., 'done_1', 'progress_2', 'stuck_3')
+                task_num = int(button_id.split('_')[1]) - 1  # Convert to 0-based index
+                command_type = button_id.split('_')[0].upper()
+                
+                # Get current task status
+                tasks = self.task.get_daily_tasks(user_id, instance_id)
+                if task_num < 0 or task_num >= len(tasks):
+                    response = f"Hmm, I don't see task #{task_num + 1} on your list. Want to try again or type 'TASKS' to see your current list?"
+                    self.whatsapp.send_message(user_id, response)
+                    return
+                
+                current_task = tasks[task_num]
+                if 'status' in current_task:
+                    # Task already has a status, ask for confirmation
+                    status_map = {
+                        'completed': 'Done ✅',
+                        'in_progress': 'In Progress 🔄',
+                        'stuck': 'Stuck ❗',
+                        'pending': 'Not Started'
+                    }
+                    current_status = status_map.get(current_task['status'], current_task['status'])
+                    new_status = button_data['interactive']['button_reply']['title']
+                    
+                    message = (
+                        f"This task is currently marked as {current_status}. "
+                        f"Are you sure you want to change it to {new_status}?"
                     )
-            
-            self.whatsapp.send_message(user_id, response)
+                    
+                    buttons = [
+                        {"id": f"confirm_yes_{command_type.lower()}_{task_num + 1}", "title": "Yes"},
+                        {"id": f"confirm_no_{command_type.lower()}_{task_num + 1}", "title": "No"}
+                    ]
+                    
+                    self.whatsapp.send_interactive_buttons(user_id, message, buttons)
+                else:
+                    # First time setting status, no confirmation needed
+                    status_map = {
+                        'DONE': 'completed',
+                        'PROGRESS': 'in_progress',
+                        'STUCK': 'stuck'
+                    }
+                    
+                    # Update task status
+                    self.task.update_task_status(user_id, task_num, status_map[command_type], instance_id)
+                    
+                    # Get the updated task list and generate response
+                    tasks = self.task.get_daily_tasks(user_id, instance_id)
+                    task_name = tasks[task_num]['task']
+                    if command_type == 'DONE':
+                        responses = [
+                            f"🎉 Yes! You completed '{task_name}'! That's a genuine win - how did it feel to finish that one?",
+                            f"✨ Amazing job finishing '{task_name}'! What helped you get this done today?",
+                            f"💪 '{task_name}' → DONE! That's awesome progress. Would you like to take a moment to celebrate?"
+                        ]
+                        response = random.choice(responses)
+                    elif command_type == 'PROGRESS':
+                        responses = [
+                            f"👍 Thanks for letting me know you're working on '{task_name}'. Taking those first steps can be the hardest part!",
+                            f"🔄 Got it - '{task_name}' is in progress. Remember, consistent effort matters more than perfect execution.",
+                            f"⏳ '{task_name}' in progress - that's great! Is there anything that would make this task flow better for you?"
+                        ]
+                        response = random.choice(responses)
+                    else:  # STUCK
+                        response = (
+                            f"I hear you're feeling stuck with '{task_name}'. That happens to everyone, especially with complicated or less interesting tasks.\n\n"
+                            f"Would you like to:\n"
+                            f"1. Break this down into smaller steps?\n"
+                            f"2. Talk about what specific part feels challenging?\n"
+                            f"3. Get some motivation or a different approach?\n"
+                            f"4. Set this aside for now and come back to it later?"
+                        )
+                    
+                    self.whatsapp.send_message(user_id, response)
             
             # Update check-in context
             context_updates = {
