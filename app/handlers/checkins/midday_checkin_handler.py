@@ -211,15 +211,46 @@ class MiddayCheckinHandler:
             task_num = int(button_id.split('_')[1]) - 1  # Convert to 0-based index
             command_type = button_id.split('_')[0].upper()
             
-            # Create a command match object similar to what we get from regex
-            class CommandMatch:
-                def __init__(self, command_type, task_num):
-                    self.group = lambda n: command_type if n == 1 else str(task_num + 1)
+            # Map command type to status
+            status_map = {
+                'DONE': 'completed',
+                'PROGRESS': 'in_progress',
+                'STUCK': 'stuck'
+            }
             
-            command_match = CommandMatch(command_type, task_num)
+            # Update task status
+            self.task.update_task_status(user_id, task_num, status_map[command_type], instance_id)
             
-            # Use task handler to process the command
-            response = self.task_handler.handle_task_command(user_id, command_match, instance_id)
+            # Get the updated task list
+            tasks = self.task.get_daily_tasks(user_id, instance_id)
+            if task_num < 0 or task_num >= len(tasks):
+                response = f"Hmm, I don't see task #{task_num + 1} on your list. Want to try again or type 'TASKS' to see your current list?"
+            else:
+                task_name = tasks[task_num]['task']
+                if command_type == 'DONE':
+                    responses = [
+                        f"🎉 Yes! You completed '{task_name}'! That's a genuine win - how did it feel to finish that one?",
+                        f"✨ Amazing job finishing '{task_name}'! What helped you get this done today?",
+                        f"💪 '{task_name}' → DONE! That's awesome progress. Would you like to take a moment to celebrate?"
+                    ]
+                    response = random.choice(responses)
+                elif command_type == 'PROGRESS':
+                    responses = [
+                        f"👍 Thanks for letting me know you're working on '{task_name}'. Taking those first steps can be the hardest part!",
+                        f"🔄 Got it - '{task_name}' is in progress. Remember, consistent effort matters more than perfect execution.",
+                        f"⏳ '{task_name}' in progress - that's great! Is there anything that would make this task flow better for you?"
+                    ]
+                    response = random.choice(responses)
+                else:  # STUCK
+                    response = (
+                        f"I hear you're feeling stuck with '{task_name}'. That happens to everyone, especially with complicated or less interesting tasks.\n\n"
+                        f"Would you like to:\n"
+                        f"1. Break this down into smaller steps?\n"
+                        f"2. Talk about what specific part feels challenging?\n"
+                        f"3. Get some motivation or a different approach?\n"
+                        f"4. Set this aside for now and come back to it later?"
+                    )
+            
             self.whatsapp.send_message(user_id, response)
             
             # Update check-in context
