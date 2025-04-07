@@ -105,45 +105,39 @@ class DailyCheckinHandler:
                     user_id, 'AWAITING_SUPPORT_CHOICE', instance_id, context_updates
                 )
             else:
-                # Get today's tasks from weekly plan if available
-                today = datetime.now().strftime('%A')
-                tasks = self.task.get_weekly_tasks(user_id, instance_id, today)
+                # Check planning type first
+                planning_type = context.get('planning_type')
+                logger.info(f"User {user_id} planning type: {planning_type}")
                 
-                if tasks:
-                    # Show today's tasks from weekly plan
-                    task_list = "\n".join([f"{i}. {task['task']}" for i, task in enumerate(tasks, 1)])
-                    message = (
-                        f"Great energy, {name}! Here are your tasks for today:\n\n"
-                        f"{task_list}\n\n"
-                        "You can update your tasks using these commands:\n"
-                        "• DONE [number] - Mark a task as complete\n"
-                        "• PROGRESS [number] - Mark a task as in progress\n"
-                        "• STUCK [number] - Let me know if you need help\n"
-                        "• ADD [task] - Add a new task\n"
-                        "• REMOVE [number] - Remove a task\n\n"
-                        "Let's make today productive! 💪"
-                    )
-                    self.whatsapp.send_message(user_id, message)
-                    self.task.update_user_state(
-                        user_id, 'TASK_UPDATE', instance_id, context_updates
-                    )
+                if planning_type == 'weekly':
+                    # Get today's tasks from weekly plan
+                    today = datetime.now().strftime('%A')
+                    tasks = self.task.get_weekly_tasks(user_id, instance_id, today)
+                    
+                    if tasks:
+                        # Show today's tasks from weekly plan
+                        task_list = "\n".join([f"{i}. {task['task']}" for i, task in enumerate(tasks, 1)])
+                        message = (
+                            f"Great energy, {name}! Here are your tasks for today:\n\n"
+                            f"{task_list}\n\n"
+                            "You can update your tasks using these commands:\n"
+                            "• DONE [number] - Mark a task as complete\n"
+                            "• PROGRESS [number] - Mark a task as in progress\n"
+                            "• STUCK [number] - Let me know if you need help\n"
+                            "• ADD [task] - Add a new task\n"
+                            "• REMOVE [number] - Remove a task\n\n"
+                            "Let's make today productive! 💪"
+                        )
+                        self.whatsapp.send_message(user_id, message)
+                        self.task.update_user_state(
+                            user_id, 'TASK_UPDATE', instance_id, context_updates
+                        )
+                    else:
+                        # No weekly tasks found, ask for daily tasks
+                        self._prompt_for_daily_tasks(user_id, name, instance_id, context_updates)
                 else:
-                    # Ask for tasks if none found in weekly plan
-                    message = (
-                        f"Great energy, {name}! Let's plan your tasks for today.\n\n"
-                        "Please list your tasks in this format:\n"
-                        "1. [Your first task]\n"
-                        "2. [Your second task]\n"
-                        "3. [Your third task]\n\n"
-                        "For example:\n"
-                        "1. Review project documents\n"
-                        "2. Send follow-up emails\n"
-                        "3. Update task tracker"
-                    )
-                    self.whatsapp.send_message(user_id, message)
-                    self.task.update_user_state(
-                        user_id, 'DAILY_TASK_INPUT', instance_id, context_updates
-                    )
+                    # For daily planning, always ask for new tasks
+                    self._prompt_for_daily_tasks(user_id, name, instance_id, context_updates)
             
         except Exception as e:
             logger.error(f"Error in daily check-in: {str(e)}", exc_info=True)
@@ -151,7 +145,25 @@ class DailyCheckinHandler:
                 user_id,
                 "I encountered an error processing your check-in. Let's try again - how are you feeling?"
             )
-            
+
+    def _prompt_for_daily_tasks(self, user_id: str, name: str, instance_id: str, context_updates: dict) -> None:
+        """Helper method to prompt user for daily tasks."""
+        message = (
+            f"Great energy, {name}! Let's plan your tasks for today.\n\n"
+            "Please list your tasks in this format:\n"
+            "1. [Your first task]\n"
+            "2. [Your second task]\n"
+            "3. [Your third task]\n\n"
+            "For example:\n"
+            "1. Review project documents\n"
+            "2. Send follow-up emails\n"
+            "3. Update task tracker"
+        )
+        self.whatsapp.send_message(user_id, message)
+        self.task.update_user_state(
+            user_id, 'DAILY_TASK_INPUT', instance_id, context_updates
+        )
+
     def handle_daily_task_input(self, user_id: str, message_text: str, instance_id: str, context: dict) -> None:
         """Handle daily task input."""
         try:

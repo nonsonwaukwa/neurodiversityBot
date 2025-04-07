@@ -30,3 +30,10 @@ build/
 # OS specific files
 .DS_Store
 Thumbs.db 
+
+
+# temporary files
+check_all_tasks.py
+check_daily_tasks.py
+check_user_tasks.py
+list_tasks.py
