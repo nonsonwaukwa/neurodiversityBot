@@ -2,6 +2,9 @@ from datetime import datetime
 import time
 from typing import Dict, Any, List, Optional
 from firebase_admin import firestore
+import logging
+
+logger = logging.getLogger(__name__)
 
 class Task:
     """Model representing a task in the system."""
@@ -66,7 +69,22 @@ class Task:
             db = firestore.client()
             date_str = date.strftime('%Y-%m-%d')
             
-            # Query unified collection first
+            # First try instance-specific collection
+            instance_id = 'default'  # Default instance if not specified
+            instance_user_ref = db.collection('instances').document(instance_id).collection('users').document(user_id)
+            user_doc = instance_user_ref.get()
+            
+            if user_doc.exists:
+                user_data = user_doc.to_dict()
+                daily_tasks = user_data.get('daily_tasks', [])
+                if daily_tasks:
+                    tasks = []
+                    for task in daily_tasks:
+                        task['task_id'] = f"{instance_id}_{user_id}_{int(time.time())}"
+                        tasks.append(Task.from_dict(task))
+                    return tasks
+            
+            # If no tasks found in instance collection, try unified collection
             tasks_ref = db.collection('users').document(user_id).collection('daily_tasks')
             query = tasks_ref.where('date', '==', date_str).where('status', '==', 'active')
             
@@ -81,7 +99,7 @@ class Task:
             return tasks
             
         except Exception as e:
-            print(f"Error getting tasks for date: {e}")
+            logger.error(f"Error getting tasks for date: {e}", exc_info=True)
             return []
     
     @staticmethod

@@ -46,12 +46,100 @@ class TaskService:
         try:
             self.db = firestore.client()
             self.use_firestore = True
+            self._setup_sync_listeners()
             print("Using Firestore for data storage")
         except Exception as e:
             self.use_firestore = False
             print(f"Warning: Firestore unavailable - {str(e)}")
             print("Using in-memory storage as fallback (data will be lost on restart)")
         
+    def _setup_sync_listeners(self):
+        """Set up real-time listeners for syncing between collections."""
+        try:
+            # Listen for changes in instance collections
+            for instance_id in ['instance1', 'instance2']:  # Add more instances as needed
+                users_ref = self.db.collection('instances').document(instance_id).collection('users')
+                
+                def on_snapshot(col_snapshot, changes, read_time):
+                    for change in changes:
+                        if change.type.name == 'MODIFIED' or change.type.name == 'ADDED':
+                            try:
+                                user_id = change.document.id
+                                user_data = change.document.to_dict()
+                                
+                                # Sync to unified collection
+                                self._sync_to_unified(user_id, user_data, instance_id)
+                                
+                            except Exception as e:
+                                logger.error(f"Error in sync listener for user {change.document.id}: {e}", exc_info=True)
+                
+                # Start listening
+                users_ref.on_snapshot(on_snapshot)
+                logger.info(f"Started sync listener for instance {instance_id}")
+                
+        except Exception as e:
+            logger.error(f"Error setting up sync listeners: {e}", exc_info=True)
+
+    def _sync_to_unified(self, user_id: str, user_data: dict, instance_id: str):
+        """Sync user data to unified collection."""
+        try:
+            # Get current unified data
+            unified_ref = self.db.collection('users').document(user_id)
+            unified_doc = unified_ref.get()
+            
+            # Prepare data for sync
+            sync_data = {
+                'instance_id': instance_id,
+                'last_sync': int(time.time()),
+                'sync_status': 'synced'
+            }
+            
+            # Add task-specific data
+            if 'daily_tasks' in user_data:
+                sync_data['daily_tasks'] = user_data['daily_tasks']
+                # Store in daily_tasks subcollection
+                daily_tasks_ref = unified_ref.collection('daily_tasks').document()
+                daily_tasks_ref.set({
+                    'tasks': user_data['daily_tasks'],
+                    'created_at': int(time.time()),
+                    'date': datetime.now().strftime('%Y-%m-%d'),
+                    'instance_id': instance_id,
+                    'status': 'active'
+                })
+            
+            if 'weekly_tasks' in user_data:
+                sync_data['weekly_tasks'] = user_data['weekly_tasks']
+                # Store in weekly_tasks subcollection
+                weekly_tasks_ref = unified_ref.collection('weekly_tasks').document()
+                weekly_tasks_ref.set({
+                    'tasks': user_data['weekly_tasks'],
+                    'created_at': int(time.time()),
+                    'week_starting': self._get_week_start_timestamp(),
+                    'instance_id': instance_id,
+                    'status': 'active'
+                })
+            
+            # Update unified collection
+            if unified_doc.exists:
+                unified_ref.update(sync_data)
+            else:
+                unified_ref.set(sync_data)
+                
+            logger.info(f"Successfully synced data for user {user_id}")
+            
+        except Exception as e:
+            logger.error(f"Error syncing to unified collection for user {user_id}: {e}", exc_info=True)
+            # Mark sync as failed in instance collection
+            try:
+                instance_ref = self.db.collection('instances').document(instance_id).collection('users').document(user_id)
+                instance_ref.update({
+                    'sync_status': 'failed',
+                    'last_sync_error': str(e),
+                    'last_sync_attempt': int(time.time())
+                })
+            except Exception as update_error:
+                logger.error(f"Error marking sync failure: {update_error}", exc_info=True)
+
     def get_user_state(self, user_id: str, instance_id: str) -> Dict[str, Any]:
         """Get the current state and context of the user in the system."""
         try:
@@ -569,14 +657,46 @@ class TaskService:
         """Get the user's tasks for the current day."""
         try:
             if self.use_firestore:
+                # First try instance-specific collection
                 user_ref = self.db.collection('instances').document(instance_id).collection('users').document(user_id)
                 user_doc = user_ref.get()
                 
-                if not user_doc.exists:
-                    return []
-                    
-                user_data = user_doc.to_dict()
-                return self._get_tasks_from_data(user_data)
+                if user_doc.exists:
+                    user_data = user_doc.to_dict()
+                    daily_tasks = user_data.get('daily_tasks', [])
+                    if daily_tasks:
+                        logger.info(f"Found {len(daily_tasks)} tasks in instance collection")
+                        return daily_tasks
+                
+                # If no tasks found in instance collection, try unified collection
+                logger.info("No tasks found in instance collection, trying unified collection")
+                tasks_ref = self.db.collection('users').document(user_id).collection('daily_tasks')
+                query = tasks_ref.where('date', '==', datetime.now().strftime('%Y-%m-%d')).where('status', '==', 'active')
+                
+                docs = query.get()
+                if docs:
+                    for doc in docs:
+                        task_data = doc.to_dict()
+                        tasks = task_data.get('tasks', [])
+                        if tasks:
+                            logger.info(f"Found {len(tasks)} tasks in unified collection")
+                            
+                            # Sync back to instance collection
+                            try:
+                                user_ref.set({
+                                    'daily_tasks': tasks,
+                                    'last_sync': int(time.time()),
+                                    'sync_status': 'synced'
+                                }, merge=True)
+                                logger.info("Successfully synced tasks back to instance collection")
+                            except Exception as sync_error:
+                                logger.error(f"Error syncing tasks back to instance collection: {sync_error}", exc_info=True)
+                            
+                            return tasks
+                
+                logger.info("No tasks found in either collection")
+                return []
+                
             else:
                 # Fallback to in-memory storage
                 instance_key = f"{instance_id}:{user_id}"
@@ -585,8 +705,9 @@ class TaskService:
                 
                 user_data = memory_storage['users'][instance_key]
                 return self._get_tasks_from_data(user_data)
+                
         except Exception as e:
-            logger.error(f"Error getting daily tasks: {str(e)}")
+            logger.error(f"Error getting daily tasks: {e}", exc_info=True)
             return []
     
     def get_user_name(self, user_id: str, instance_id: str = 'default') -> str:
@@ -842,30 +963,60 @@ class TaskService:
             logger.info(f"[STORE_DAILY] Starting to store daily tasks for user {user_id}")
             logger.info(f"[STORE_DAILY] Tasks to store: {tasks}")
             
-            # Store in unified collection
+            # First store in instance-specific collection
+            logger.info(f"[STORE_DAILY] Storing in instance collection /instances/{instance_id}/users/{user_id}")
+            instance_user_ref = self.db.collection('instances').document(instance_id).collection('users').document(user_id)
+            
+            # Get current user data to preserve other fields
+            user_doc = instance_user_ref.get()
+            current_data = user_doc.to_dict() if user_doc.exists else {}
+            
+            # Update with new tasks while preserving other fields
+            update_data = {
+                'daily_tasks': tasks,
+                'last_daily_planning': int(time.time()),
+                'last_interaction': datetime.now()
+            }
+            
+            # Merge with existing data
+            update_data.update({k: v for k, v in current_data.items() if k not in update_data})
+            
+            # Update instance collection
+            instance_user_ref.set(update_data, merge=True)
+            logger.info(f"[STORE_DAILY] Successfully stored in instance collection")
+            
+            # Then store in unified collection
             logger.info(f"[STORE_DAILY] Storing in unified collection /users/{user_id}/daily_tasks/")
             user_ref = self.db.collection('users').document(user_id)
             daily_tasks_ref = user_ref.collection('daily_tasks').document()
+            
+            # Store with additional metadata
             daily_tasks_ref.set({
                 'tasks': tasks,
                 'created_at': int(time.time()),
                 'date': datetime.now().strftime('%Y-%m-%d'),
                 'instance_id': instance_id,
-                'status': 'active'
+                'status': 'active',
+                'sync_status': 'synced',
+                'last_sync': int(time.time())
             })
             logger.info(f"[STORE_DAILY] Successfully stored in unified collection")
-            
-            # Also store in instance-specific collection
-            logger.info(f"[STORE_DAILY] Storing in instance collection /instances/{instance_id}/users/{user_id}")
-            instance_user_ref = self.db.collection('instances').document(instance_id).collection('users').document(user_id)
-            instance_user_ref.update({
-                'daily_tasks': tasks,
-                'last_daily_planning': int(time.time()),
-            })
-            logger.info(f"[STORE_DAILY] Successfully stored in instance collection")
             
             logger.info(f"[STORE_DAILY] Completed storing daily tasks for user {user_id}")
             
         except Exception as e:
             logger.error(f"[STORE_DAILY] Error storing daily tasks for user {user_id}: {e}", exc_info=True)
+            # If instance collection update failed, don't proceed with unified collection
+            if 'instance_user_ref' not in locals() or not instance_user_ref.get().exists:
+                raise
+            
+            # If instance update succeeded but unified failed, mark for sync
+            try:
+                instance_user_ref.update({
+                    'sync_status': 'pending',
+                    'last_sync_error': str(e),
+                    'last_sync_attempt': int(time.time())
+                })
+            except Exception as sync_error:
+                logger.error(f"[STORE_DAILY] Error marking sync status: {sync_error}", exc_info=True)
             raise 
