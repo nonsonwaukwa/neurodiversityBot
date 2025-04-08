@@ -2,7 +2,7 @@ import logging
 import time
 import re
 import random
-from typing import Dict, Any
+from typing import Dict, Any, List
 from app.models.user import User
 
 logger = logging.getLogger(__name__)
@@ -10,11 +10,12 @@ logger = logging.getLogger(__name__)
 class MiddayCheckinHandler:
     """Handler for midday check-ins and task status updates."""
     
-    def __init__(self, whatsapp_service, task_service, sentiment_service, task_handler):
+    def __init__(self, whatsapp_service, task_service, sentiment_service, task_handler, deepseek_service):
         self.whatsapp = whatsapp_service
         self.task = task_service
         self.sentiment = sentiment_service
         self.task_handler = task_handler
+        self.deepseek = deepseek_service
         # Message deduplication cache
         self._message_cache = {}
         
@@ -118,6 +119,23 @@ class MiddayCheckinHandler:
                     'STUCK': 'stuck'
                 }
                 
+                if status_type == 'STUCK':
+                    # Show stuck options with interactive buttons
+                    buttons = [
+                        {"id": f"stuck_overwhelmed_{task_num}", "title": "😵 It's overwhelming"},
+                        {"id": f"stuck_tired_{task_num}", "title": "😩 I'm tired"},
+                        {"id": f"stuck_unclear_{task_num}", "title": "🤯 It feels unclear"},
+                        {"id": f"stuck_unmotivated_{task_num}", "title": "😐 Just not feeling it"},
+                        {"id": f"stuck_pause_{task_num}", "title": "🤔 Pause This Task"}
+                    ]
+                    
+                    self.whatsapp.send_interactive_buttons(
+                        user_id,
+                        f"Hey, it happens! Getting stuck is part of the process. Sometimes it helps to name what's getting in the way. Does any of this feel true right now?",
+                        buttons
+                    )
+                    return None  # Response will be handled by handle_midday_button_response
+                
                 self.task.update_task_status(user_id, task_num, status_map[status_type], instance_id)
                 
                 if status_type == 'DONE':
@@ -135,15 +153,6 @@ class MiddayCheckinHandler:
                         f"⏳ '{task_name}' in progress - that's great! Is there anything that would make this task flow better for you?"
                     ]
                     return random.choice(responses)
-                else:  # STUCK
-                    return (
-                        f"I hear you're feeling stuck with '{task_name}'. That happens to everyone, especially with complicated or less interesting tasks.\n\n"
-                        f"Would you like to:\n"
-                        f"1. Break this down into smaller steps?\n"
-                        f"2. Talk about what specific part feels challenging?\n"
-                        f"3. Get some motivation or a different approach?\n"
-                        f"4. Set this aside for now and come back to it later?"
-                    )
             except ValueError:
                 return "I didn't quite catch which task number you meant. Could you try again with something like 'DONE 1' or 'STUCK 2'?"
         
@@ -194,6 +203,88 @@ class MiddayCheckinHandler:
         try:
             # Clean old cache entries
             self._clean_message_cache()
+            
+            # Check for duplicate message if it's an interactive message
+            if isinstance(button_data, dict):
+                message_id = button_data.get('id')
+                if message_id and self._is_duplicate_message(message_id, user_id):
+                    logger.info(f"Skipping duplicate message {message_id} for user {user_id}")
+                    return
+            
+            logger.info(f"Processing midday button response for user {user_id}")
+            
+            # Extract button data from the correct structure
+            button_id = button_data['interactive']['button_reply']['id']
+            
+            # Handle stuck task responses
+            if button_id.startswith('stuck_'):
+                _, reason, task_num = button_id.split('_')
+                task_num = int(task_num)
+                
+                # Get the task
+                tasks = self.task.get_daily_tasks(user_id, instance_id)
+                if task_num < 0 or task_num >= len(tasks):
+                    self.whatsapp.send_message(user_id, "Hmm, I don't see that task anymore. Want to try again or type 'TASKS' to see your current list?")
+                    return
+                
+                task = tasks[task_num]
+                
+                if reason == 'overwhelmed':
+                    # Offer to break down the task
+                    self.handle_task_breakdown(user_id, task_num, instance_id)
+                elif reason == 'tired':
+                    self.whatsapp.send_message(
+                        user_id,
+                        "Want to set a timer for a 10-minute rest? Sometimes that makes the next step easier. You can come back to this when you're feeling more refreshed."
+                    )
+                elif reason == 'unclear':
+                    # Offer to break down the task
+                    self.handle_task_breakdown(user_id, task_num, instance_id)
+                elif reason == 'unmotivated':
+                    self.whatsapp.send_message(
+                        user_id,
+                        "Maybe your energy's pointing you elsewhere right now. Would you like to switch to a different task for a while? Sometimes a change of focus can help."
+                    )
+                elif reason == 'pause':
+                    self.whatsapp.send_message(
+                        user_id,
+                        "Totally okay to pause this for now. Sometimes stepping away is the most productive thing we can do. You can come back to it when you're ready."
+                    )
+                    # Update task status to paused
+                    self.task.update_task_status(user_id, task_num, 'paused', instance_id)
+                
+                return
+            
+            # Handle task breakdown responses
+            if button_id.startswith('breakdown_'):
+                _, action, task_num = button_id.split('_')
+                task_num = int(task_num)
+                
+                # Get the task
+                tasks = self.task.get_daily_tasks(user_id, instance_id)
+                if task_num < 0 or task_num >= len(tasks):
+                    self.whatsapp.send_message(user_id, "Hmm, I don't see that task anymore. Want to try again or type 'TASKS' to see your current list?")
+                    return
+                
+                if action == 'start':
+                    # Update task status to in_progress
+                    self.task.update_task_status(user_id, task_num, 'in_progress', instance_id)
+                    self.whatsapp.send_message(
+                        user_id,
+                        "Great choice! Let's focus on that first step. You've got this! 💪"
+                    )
+                elif action == 'save':
+                    self.whatsapp.send_message(
+                        user_id,
+                        "No problem! I'll keep these steps handy for when you're ready to tackle this task."
+                    )
+                elif action == 'different':
+                    self.whatsapp.send_message(
+                        user_id,
+                        "Let's try a different approach. What's the very first small step you could take? Sometimes starting with something tiny can help clarify the path forward."
+                    )
+                
+                return
             
             # Check for duplicate message if it's an interactive message
             if isinstance(button_data, dict):
@@ -354,4 +445,84 @@ class MiddayCheckinHandler:
             self.whatsapp.send_message(
                 user_id,
                 "I had trouble processing your response. Could you try again?"
+            )
+
+    def _break_down_task(self, task_description: str) -> List[str]:
+        """Break down a task into smaller, manageable steps using DeepSeek."""
+        try:
+            # Prepare the prompt for DeepSeek
+            prompt = f"""
+            Please break down the following task into 3-5 smaller, actionable steps.
+            Each step should be specific, measurable, and achievable.
+            Task: {task_description}
+            
+            Format the response as a numbered list of steps.
+            """
+            
+            # Call DeepSeek API
+            response = self.deepseek.generate(prompt)
+            
+            # Parse the response into steps
+            steps = []
+            for line in response.split('\n'):
+                line = line.strip()
+                if line and line[0].isdigit():
+                    # Remove the number and any following punctuation
+                    step = re.sub(r'^\d+[\.\)]?\s*', '', line)
+                    if step:
+                        steps.append(step)
+            
+            return steps
+            
+        except Exception as e:
+            logger.error(f"Error breaking down task: {e}", exc_info=True)
+            return []
+
+    def handle_task_breakdown(self, user_id: str, task_num: int, instance_id: str):
+        """Handle breaking down a task into smaller steps."""
+        try:
+            # Get the task
+            tasks = self.task.get_daily_tasks(user_id, instance_id)
+            if task_num < 0 or task_num >= len(tasks):
+                self.whatsapp.send_message(user_id, "Hmm, I don't see that task anymore. Want to try again or type 'TASKS' to see your current list?")
+                return
+            
+            task = tasks[task_num]
+            
+            # Break down the task
+            steps = self._break_down_task(task['task'])
+            
+            if not steps:
+                self.whatsapp.send_message(
+                    user_id,
+                    "I had trouble breaking down this task. Let's try a different approach - what's the very first small step you could take?"
+                )
+                return
+            
+            # Format the steps for display
+            step_list = "\n".join([f"{i+1}. {step}" for i, step in enumerate(steps)])
+            
+            # Send the breakdown with options
+            message = (
+                f"Here's how we could break down '{task['task']}':\n\n"
+                f"{step_list}\n\n"
+                "Would you like to:\n"
+                "1. Start with the first step?\n"
+                "2. Save these steps for later?\n"
+                "3. Try a different approach?"
+            )
+            
+            buttons = [
+                {"id": f"breakdown_start_{task_num}", "title": "Start First Step"},
+                {"id": f"breakdown_save_{task_num}", "title": "Save for Later"},
+                {"id": f"breakdown_different_{task_num}", "title": "Try Different Approach"}
+            ]
+            
+            self.whatsapp.send_interactive_buttons(user_id, message, buttons)
+            
+        except Exception as e:
+            logger.error(f"Error handling task breakdown: {e}", exc_info=True)
+            self.whatsapp.send_message(
+                user_id,
+                "I had trouble breaking down this task. Let's try a different approach - what's the very first small step you could take?"
             ) 
