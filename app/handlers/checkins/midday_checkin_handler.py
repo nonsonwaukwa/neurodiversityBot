@@ -119,11 +119,10 @@ class MiddayCheckinHandler:
                     'STUCK': 'stuck'
                 }
                 
-                if status_type == 'STUCK':
+                if status_type == 'STUCK': 
                     # Show stuck options with interactive buttons
                     buttons = [
                         {"id": f"stuck_overwhelmed_{task_num}", "title": "😵 It's overwhelming"},
-                        {"id": f"stuck_tired_{task_num}", "title": "😩 I'm tired"},
                         {"id": f"stuck_unclear_{task_num}", "title": "🤯 It feels unclear"},
                         {"id": f"stuck_pause_{task_num}", "title": "🤔 Pause This Task"}
                     ]
@@ -215,10 +214,38 @@ class MiddayCheckinHandler:
             # Extract button data from the correct structure
             button_id = button_data['interactive']['button_reply']['id']
             
-            # Handle stuck task responses
+            # Handle initial stuck task responses
             if button_id.startswith('stuck_'):
-                # Split the button ID to get the task number
-                _, task_num = button_id.split('_')
+                parts = button_id.split('_')
+                if len(parts) == 2:  # Initial stuck response
+                    # Split the button ID to get the task number
+                    _, task_num = parts
+                    task_num = int(task_num)
+                    
+                    # Get the task
+                    tasks = self.task.get_daily_tasks(user_id, instance_id)
+                    if task_num < 0 or task_num >= len(tasks):
+                        self.whatsapp.send_message(user_id, "Hmm, I don't see that task anymore. Want to try again or type 'TASKS' to see your current list?")
+                        return
+                    
+                    task = tasks[task_num]
+                    
+                    # Show stuck options with interactive buttons
+                    buttons = [
+                        {"id": f"stuck_overwhelmed_{task_num}", "title": "😵 It's overwhelming"},
+                        {"id": f"stuck_unclear_{task_num}", "title": "🤯 It feels unclear"},
+                        {"id": f"stuck_pause_{task_num}", "title": "🤔 Pause This Task"}
+                    ]
+                    
+                    self.whatsapp.send_interactive_buttons(
+                        user_id,
+                        f"Hey, it happens! Getting stuck is part of the process. Sometimes it helps to name what's getting in the way. Does any of this feel true right now?",
+                        buttons
+                    )
+                    return
+                
+                # Handle specific stuck reasons
+                _, reason, task_num = parts
                 task_num = int(task_num)
                 
                 # Get the task
@@ -229,62 +256,21 @@ class MiddayCheckinHandler:
                 
                 task = tasks[task_num]
                 
-                # Send empathetic message with options
-                message = (
-                    f"I hear you're feeling stuck with '{task['task']}'. That's completely okay.\n\n"
-                    "Would you like to:\n"
-                    "1. Break it down into smaller steps?\n"
-                    "2. Take a short break and come back to it?\n"
-                    "3. Try a different approach?\n"
-                    "4. Set it aside for now?"
-                )
-                
-                buttons = [
-                    {"id": f"stuck_breakdown_{task_num}", "title": "Break It Down"},
-                    {"id": f"stuck_break_{task_num}", "title": "Take a Break"},
-                    {"id": f"stuck_different_{task_num}", "title": "Try Different"},
-                    {"id": f"stuck_pause_{task_num}", "title": "Set Aside"}
-                ]
-                
-                self.whatsapp.send_interactive_buttons(user_id, message, buttons)
+                if reason == 'overwhelmed':
+                    # Offer to break down the task
+                    self.handle_task_breakdown(user_id, task_num, instance_id)
+                elif reason == 'unclear':
+                    # Offer to break down the task
+                    self.handle_task_breakdown(user_id, task_num, instance_id)
+                elif reason == 'pause':
+                    self.whatsapp.send_message(
+                        user_id,
+                        "Totally okay to pause this for now. Sometimes stepping away is the most productive thing we can do. You can come back to it when you're ready."
+                    )
+                    # Update task status to paused
+                    self.task.update_task_status(user_id, task_num, 'paused', instance_id)
                 return
-            
-            # Handle task breakdown responses
-            if button_id.startswith('stuck_breakdown_'):
-                _, _, task_num = button_id.split('_')
-                task_num = int(task_num)
-                self.handle_task_breakdown(user_id, task_num, instance_id)
-                return
-                
-            elif button_id.startswith('stuck_break_'):
-                _, _, task_num = button_id.split('_')
-                task_num = int(task_num)
-                self.whatsapp.send_message(
-                    user_id,
-                    "Want to set a timer for a 10-minute rest? Sometimes that makes the next step easier. You can come back to this when you're feeling more refreshed."
-                )
-                return
-                
-            elif button_id.startswith('stuck_different_'):
-                _, _, task_num = button_id.split('_')
-                task_num = int(task_num)
-                self.whatsapp.send_message(
-                    user_id,
-                    "Let's try a different approach. What's the very first small step you could take? Sometimes starting with something tiny can help clarify the path forward."
-                )
-                return
-                
-            elif button_id.startswith('stuck_pause_'):
-                _, _, task_num = button_id.split('_')
-                task_num = int(task_num)
-                self.whatsapp.send_message(
-                    user_id,
-                    "Totally okay to pause this for now. Sometimes stepping away is the most productive thing we can do. You can come back to it when you're ready."
-                )
-                # Update task status to paused
-                self.task.update_task_status(user_id, task_num, 'paused', instance_id)
-                return
-            
+                        
             # Check for duplicate message if it's an interactive message
             if isinstance(button_data, dict):
                 message_id = button_data.get('id')
