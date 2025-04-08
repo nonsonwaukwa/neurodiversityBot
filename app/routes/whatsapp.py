@@ -2,6 +2,7 @@ from flask import Blueprint, request, jsonify
 from app.services.whatsapp_service import WhatsAppService
 from app.services.sentiment_service import SentimentService
 from app.services.task_service import TaskService
+from app.services.taskbreakdown_service import TaskBreakdownService
 from app.models.user import User
 from app.utils.validation import parse_task_input, validate_task_input
 from firebase_admin import firestore
@@ -30,7 +31,8 @@ for instance_id in ['instance1', 'instance2']:  # Add more instances as needed
     instances[instance_id] = {
         'whatsapp': WhatsAppService(instance_id),
         'sentiment': SentimentService(),
-        'task': TaskService()
+        'task': TaskService(),
+        'taskbreakdown': TaskBreakdownService()  # Add DeepSeek service
     }
 
 # Initialize Firestore
@@ -215,7 +217,7 @@ def handle_message(message_id: str, user_id: str, message_text: str, instance_id
     try:
         # Initialize handlers
         task_handler = TaskHandler(services['whatsapp'], services['task'], services['sentiment'])
-        midday_handler = MiddayCheckinHandler(services['whatsapp'], services['task'], services['sentiment'], task_handler, services['deepseek'])
+        midday_handler = MiddayCheckinHandler(services['whatsapp'], services['task'], services['sentiment'], task_handler, services['taskbreakdown'])
      #   evening_handler = EveningCheckinHandler(services['whatsapp'], services['task'], services['sentiment'], task_handler)
         weekly_handler = WeeklyCheckinHandler(services['whatsapp'], services['task'], services['sentiment'], task_handler)
         daily_handler = DailyCheckinHandler(services['whatsapp'], services['task'], services['sentiment'])
