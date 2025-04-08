@@ -16,7 +16,7 @@ from app.models.checkin import CheckIn
 from app.handlers.checkins import DailyCheckinHandler, WeeklyCheckinHandler, MiddayCheckinHandler
 from app.handlers.support_handler import SupportHandler
 from app.handlers.task_handler import TaskHandler
-from app.handlers.evening_checkin import EveningCheckinHandler
+#from app.handlers.evening_checkin import EveningCheckinHandler
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -216,7 +216,7 @@ def handle_message(message_id: str, user_id: str, message_text: str, instance_id
         # Initialize handlers
         task_handler = TaskHandler(services['whatsapp'], services['task'], services['sentiment'])
         midday_handler = MiddayCheckinHandler(services['whatsapp'], services['task'], services['sentiment'], task_handler, services['deepseek'])
-        evening_handler = EveningCheckinHandler(services['whatsapp'], services['task'], services['sentiment'], task_handler)
+     #   evening_handler = EveningCheckinHandler(services['whatsapp'], services['task'], services['sentiment'], task_handler)
         weekly_handler = WeeklyCheckinHandler(services['whatsapp'], services['task'], services['sentiment'], task_handler)
         daily_handler = DailyCheckinHandler(services['whatsapp'], services['task'], services['sentiment'])
         support_handler = SupportHandler(services['whatsapp'], services['task'], services['sentiment'])
